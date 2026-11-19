@@ -60,7 +60,8 @@ API. Firmware versions differ, so before going live:
 
 ## Production notes
 
-- Put it behind a reverse proxy with HTTPS (Caddy, Traefik, nginx) and set `COOKIE_SECURE=true`.
+- Put it behind a reverse proxy with HTTPS (Caddy, Traefik, nginx, Pangolin). `COOKIE_SECURE=auto` (default) marks the session cookie Secure whenever the request arrives over HTTPS; `true` refuses sign-in over plain HTTP.
+- If a password in `.env` contains `$`, wrap it in single quotes — Compose otherwise treats `$name` as a variable.
 - Data (users, schedule, snapshot, audit log) lives in the `oncall-data` Docker volume as `/data/oncall.db`. Back up that file.
 - If `ADMIN_PASSWORD` is empty on first start, a random password is printed in the container log.
 - The UI shows times in each viewer's own time zone. They are stored as UTC.

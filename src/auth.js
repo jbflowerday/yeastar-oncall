@@ -22,7 +22,7 @@ function verifyPassword(password, stored) {
 
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
-function createSession(res, userId) {
+function createSession(req, res, userId) {
   const token = crypto.randomBytes(32).toString('base64url');
   const maxAge = config.sessionDays * 86400 * 1000;
   db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
@@ -30,7 +30,7 @@ function createSession(res, userId) {
   res.cookie(COOKIE, token, {
     httpOnly: true,
     sameSite: 'strict',
-    secure: config.cookieSecure,
+    secure: config.cookieSecure === 'auto' ? req.secure : config.cookieSecure,
     maxAge,
     path: '/',
   });

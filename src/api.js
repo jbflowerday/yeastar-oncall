@@ -24,6 +24,10 @@ router.post('/login', (req, res) => {
   const password = String(req.body?.password || '');
   const key = `${req.ip}|${username.toLowerCase()}`;
   if (auth.loginThrottled(key)) return bad(res, 'Too many attempts. Try again in a few minutes.', 429);
+  if (config.cookieSecure === true && !req.secure) {
+    // The browser would silently drop the Secure cookie, so sign-in would appear to do nothing.
+    return bad(res, 'Sign-in requires HTTPS. Open the site via its https:// address (or set COOKIE_SECURE=auto).');
+  }
 
   const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
   if (!user || !auth.verifyPassword(password, user.password_hash)) {
@@ -31,7 +35,7 @@ router.post('/login', (req, res) => {
     return bad(res, 'Invalid username or password', 401);
   }
   auth.clearFailures(key);
-  auth.createSession(res, user.id);
+  auth.createSession(req, res, user.id);
   audit(user.id, 'login');
   res.json({ user: auth.publicUser(user) });
 });

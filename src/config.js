@@ -17,7 +17,8 @@ const env = process.env;
 const config = {
   port: Number(env.PORT || 3000),
   dataDir: env.DATA_DIR || './data',
-  cookieSecure: bool(env.COOKIE_SECURE, false),
+  // 'auto' (default): Secure cookie when the request arrived over HTTPS (directly or via a proxy).
+  cookieSecure: /^auto$/i.test(env.COOKIE_SECURE || 'auto') ? 'auto' : bool(env.COOKIE_SECURE, false),
   sessionDays: Number(env.SESSION_DAYS || 7),
   checkIntervalSec: Math.max(10, Number(env.CHECK_INTERVAL_SECONDS || 30)),
 

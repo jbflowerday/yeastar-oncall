@@ -1,0 +1,18 @@
+{
+  "name": "yeastar-oncall",
+  "version": "1.0.0",
+  "description": "On-call scheduler that redirects a Yeastar P-Series inbound route to the on-call mobile number",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "private": true,
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "mock": "node dev/mock-yeastar.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

@@ -1,6 +1,10 @@
 services:
   oncall:
-    build: .
+    build:
+      # "." for a local clone; set BUILD_CONTEXT to the git URL when only the
+      # compose file is deployed (e.g. Arcane GitOps):
+      #   BUILD_CONTEXT=https://github.com/jbflowerday/yeastar-oncall.git#main
+      context: ${BUILD_CONTEXT:-.}
     image: yeastar-oncall:latest
     container_name: yeastar-oncall
     restart: unless-stopped

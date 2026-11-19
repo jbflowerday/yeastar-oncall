@@ -188,6 +188,9 @@ main { max-width: 980px; margin: 0 auto; padding: 20px 16px 110px; }
 .item .title { font-weight: 620; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item .sub { color: var(--muted); font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item .actions { display: flex; gap: 4px; }
+.sub .icon, p .icon { width: 13px; height: 13px; vertical-align: -2px; }
+.form-actions.wrap { flex-wrap: wrap; }
+@media (max-width: 720px) { .form-actions.wrap > .btn { flex: 1 1 100%; } }
 .avatar {
   flex: none; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
   font-weight: 700; font-size: .85rem; color: #fff; background: var(--accent);

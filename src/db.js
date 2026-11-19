@@ -57,6 +57,13 @@ db.exec(`
   );
 `);
 
+// Migrations for databases created by earlier versions.
+const cols = db.prepare('PRAGMA table_info(changeovers)').all().map((c) => c.name);
+if (!cols.includes('series_id')) {
+  db.exec('ALTER TABLE changeovers ADD COLUMN series_id TEXT');
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_changeovers_series ON changeovers(series_id)');
+
 function getSetting(key, fallback = null) {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
   if (!row || row.value === null) return fallback;

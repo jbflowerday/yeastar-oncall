@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const express = require('express');
 const { db, getSetting, setSetting, audit } = require('./db');
 const auth = require('./auth');
@@ -133,14 +134,40 @@ function parseChangeover(body, me) {
 
 const canEdit = (me, c) => me.is_admin || c.created_by === me.id || c.user_id === me.id;
 
+const MAX_REPEAT = 52;
+
 router.post('/changeovers', requireAuth, wrap(async (req, res) => {
-  const v = parseChangeover(req.body || {}, req.user);
+  const body = req.body || {};
+  const v = parseChangeover(body, req.user);
   if (v.error) return bad(res, v.error);
-  const r = db.prepare(`INSERT INTO changeovers (start_at, target, mobile, user_id, note, created_by, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(v.start_at, v.target, v.mobile, v.user_id, v.note, req.user.id, Date.now());
-  audit(req.user.id, 'changeover.created', { id: Number(r.lastInsertRowid), ...v });
+
+  // Weekly repeat: the browser sends every occurrence's start time (computed in the
+  // viewer's own time zone so daylight-saving changes keep the same wall-clock time).
+  let starts = [v.start_at];
+  if (Array.isArray(body.repeat_starts) && body.repeat_starts.length) {
+    if (body.repeat_starts.length + 1 > MAX_REPEAT) return bad(res, `Repeat is limited to ${MAX_REPEAT} weeks`);
+    const extra = body.repeat_starts.map((s) => Date.parse(s));
+    if (extra.some((t) => !Number.isFinite(t) || t <= v.start_at)) return bad(res, 'Invalid repeat dates');
+    starts = [v.start_at, ...extra];
+  }
+  const seriesId = starts.length > 1 ? crypto.randomUUID() : null;
+
+  const insert = db.prepare(`INSERT INTO changeovers (start_at, target, mobile, user_id, note, created_by, created_at, series_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+  const ids = [];
+  db.exec('BEGIN');
+  try {
+    for (const t of starts) {
+      ids.push(Number(insert.run(t, v.target, v.mobile, v.user_id, v.note, req.user.id, Date.now(), seriesId).lastInsertRowid));
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  audit(req.user.id, 'changeover.created', { ids, ...v, weeks: starts.length });
   scheduler.tick().catch(() => {});
-  res.status(201).json({ changeover: db.prepare(`${changeoverSelect} WHERE c.id = ?`).get(r.lastInsertRowid) });
+  res.status(201).json({ changeover: db.prepare(`${changeoverSelect} WHERE c.id = ?`).get(ids[0]), count: ids.length });
 }));
 
 router.put('/changeovers/:id', requireAuth, wrap(async (req, res) => {
@@ -162,10 +189,19 @@ router.delete('/changeovers/:id', requireAuth, wrap(async (req, res) => {
   if (!c) return bad(res, 'Not found', 404);
   if (!canEdit(req.user, c)) return bad(res, 'Not allowed', 403);
   if (c.start_at <= Date.now() && !req.user.is_admin) return bad(res, 'Only admins can delete a changeover that has started');
-  db.prepare('DELETE FROM changeovers WHERE id = ?').run(c.id);
-  audit(req.user.id, 'changeover.deleted', c);
+
+  let deleted;
+  if (req.query.scope === 'following' && c.series_id) {
+    // This occurrence and every later one in the same weekly series.
+    const mine = req.user.is_admin ? '' : 'AND (created_by = ? OR user_id = ?)';
+    const args = req.user.is_admin ? [c.series_id, c.start_at] : [c.series_id, c.start_at, req.user.id, req.user.id];
+    deleted = Number(db.prepare(`DELETE FROM changeovers WHERE series_id = ? AND start_at >= ? ${mine}`).run(...args).changes);
+  } else {
+    deleted = Number(db.prepare('DELETE FROM changeovers WHERE id = ?').run(c.id).changes);
+  }
+  audit(req.user.id, 'changeover.deleted', { ...c, scope: req.query.scope || 'one', deleted });
   scheduler.tick().catch(() => {});
-  res.json({ ok: true });
+  res.json({ ok: true, deleted });
 }));
 
 /* ------------------------------------------------------------- users */

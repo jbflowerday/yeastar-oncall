@@ -5,6 +5,8 @@ services:
       # compose file is deployed (e.g. Arcane GitOps):
       #   BUILD_CONTEXT=https://github.com/jbflowerday/yeastar-oncall.git#main
       context: ${BUILD_CONTEXT:-.}
+      # Use the host's network/DNS for npm install during the build
+      network: host
     image: yeastar-oncall:latest
     container_name: yeastar-oncall
     restart: unless-stopped

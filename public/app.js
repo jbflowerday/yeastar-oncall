@@ -68,14 +68,6 @@ function toLocalInput(ms) {
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
-function countdown(ms) {
-  let s = Math.max(0, Math.floor((ms - Date.now()) / 1000));
-  const d = Math.floor(s / 86400); s %= 86400;
-  const h = Math.floor(s / 3600); s %= 3600;
-  const m = Math.floor(s / 60); s %= 60;
-  const p = (n) => String(n).padStart(2, '0');
-  return d > 0 ? `${d}d ${p(h)}h ${p(m)}m` : `${p(h)}:${p(m)}:${p(s)}`;
-}
 const relative = (ms) => {
   const diff = Math.round((ms - Date.now()) / 60000);
   const rtf = new Intl.RelativeTimeFormat([], { numeric: 'auto' });
@@ -217,23 +209,6 @@ function heroCard(s) {
     </section>`;
 }
 
-function nextCard(s) {
-  const n = s.next;
-  if (!n) {
-    return `<section class="card next-card">
-      <div class="muted small">Next changeover</div>
-      <div class="big">Nothing scheduled</div>
-      <p class="muted small">The current setting stays in place until you add a changeover.</p>
-    </section>`;
-  }
-  return `<section class="card next-card">
-    <div class="muted small">Next changeover in</div>
-    <div class="countdown" id="countdown" data-at="${n.start_at}">${countdown(n.start_at)}</div>
-    <div class="big">${n.target === 'default' ? 'Back to normal routing' : esc(n.user_name || n.mobile)}</div>
-    <div class="muted small">${esc(fmtDateTime(n.start_at))}${n.target === 'mobile' ? ` · ${prettyNum(n.mobile)}` : ''}</div>
-  </section>`;
-}
-
 function itemRow(c, { past = false } = {}) {
   const me = state.user;
   const editable = me.is_admin || ((c.created_by === me.id || c.user_id === me.id) && !past && c.start_at > Date.now());
@@ -277,7 +252,8 @@ async function viewSchedule() {
       <h1>Schedule</h1>
       <button class="btn desktop-only" id="add-btn">${icon('plus')} Add changeover</button>
     </div>
-    <div class="grid-2">${heroCard(s)}${nextCard(s)}</div>
+    ${heroCard(s)}
+    ${quickCard(s)}
     ${s.last_error ? `<div class="card"><div class="form-error">PBX sync problem: ${esc(s.last_error.message)}</div>
       <div class="muted small">Retrying automatically. ${state.user.is_admin ? 'Check the PBX tab for details.' : 'Let an administrator know if this persists.'}</div></div>` : ''}
     <section class="card">
@@ -292,14 +268,68 @@ async function viewSchedule() {
   $('#fab')?.addEventListener('click', () => openChangeoverDialog());
   view.onclick = onScheduleClick;
 
+  const sel = $('#quick-sel');
+  sel.addEventListener('change', () => { state.quickSel = sel.value; $('#quick-go').disabled = !sel.value; });
+  $('#quick-go').addEventListener('click', () => quickSwitch(sel.value));
+
+  // Refresh shortly after the next scheduled changeover, and every 30s otherwise.
+  const nextAt = s.next?.start_at;
   tickTimer = setInterval(() => {
-    const cd = $('#countdown');
-    if (!cd) return;
-    const at = Number(cd.dataset.at);
-    cd.textContent = countdown(at);
-    if (at <= Date.now()) setTimeout(viewSchedule, 2500);
+    if (nextAt && nextAt <= Date.now() - 2500 && !$('dialog[open]')) viewSchedule();
   }, 1000);
-  refreshTimer = setInterval(() => { if (!$('dialog[open]')) viewSchedule(); }, 30000);
+  refreshTimer = setInterval(() => {
+    if (!$('dialog[open]') && document.activeElement !== $('#quick-sel')) viewSchedule();
+  }, 30000);
+}
+
+function quickCard(s) {
+  const me = state.user;
+  const users = me.is_admin ? state.users : state.users.filter((u) => u.id === me.id);
+  const a = s.active;
+  const activeKey = !a || a.target === 'default' ? 'default' : String(a.user_id || '');
+  const opt = (value, label, disabled = false) => `<option value="${esc(value)}" ${disabled ? 'disabled' : ''}
+    ${state.quickSel === value ? 'selected' : ''}>${esc(label)}</option>`;
+  const options = users.map((u) => {
+    const name = u.display_name || u.username;
+    if (!u.mobile) return opt(String(u.id), `${name} – no mobile set`, true);
+    return opt(String(u.id), `${name} · ${u.mobile}${activeKey === String(u.id) ? '  (on call now)' : ''}`);
+  }).join('');
+  const until = s.next ? `until the next scheduled changeover (${fmtDateTime(s.next.start_at)})` : 'until the next scheduled changeover';
+  return `
+    <section class="card">
+      <div class="card-head"><h2>Switch on-call now</h2></div>
+      <div class="quick-row">
+        <select class="input" id="quick-sel" aria-label="Who should be on call">
+          ${opt('', 'Choose who takes calls…', true).replace('<option', `<option ${state.quickSel ? '' : 'selected'}`)}
+          ${options}
+          ${opt('default', `Normal routing (stop forwarding)${activeKey === 'default' ? '  (current)' : ''}`)}
+        </select>
+        <button class="btn" id="quick-go" ${state.quickSel ? '' : 'disabled'}>${icon('phone')} Switch now</button>
+      </div>
+      <p class="muted small">Takes effect immediately and stays ${esc(until)}.</p>
+    </section>`;
+}
+
+async function quickSwitch(value) {
+  if (!value) return;
+  const u = state.users.find((x) => String(x.id) === value);
+  const msg = value === 'default'
+    ? 'Stop forwarding and return calls to normal routing now?'
+    : `Forward calls to ${u.display_name || u.username} (${u.mobile}) now?`;
+  if (!confirm(msg)) return;
+  const btn = $('#quick-go');
+  if (btn) btn.disabled = true;
+  try {
+    await api('POST', '/changeovers', value === 'default'
+      ? { start_at: 'now', target: 'default', note: 'Manual switch' }
+      : { start_at: 'now', target: 'mobile', user_id: u.id, mobile: u.mobile, note: 'Manual switch' });
+    state.quickSel = '';
+    toast(value === 'default' ? 'Switched to normal routing' : `${u.display_name || u.username} is now on call`);
+    viewSchedule();
+  } catch (err) {
+    toast(err.message, true);
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function onScheduleClick(e) {

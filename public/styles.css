@@ -151,8 +151,10 @@ main { max-width: 980px; margin: 0 auto; padding: 20px 16px 110px; }
 .hero .meta { margin-top: 14px; font-size: .88rem; opacity: .9; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
 .hero .pill { background: rgb(255 255 255 / .18); color: #fff; }
 
-.next-card .big { font-size: 1.15rem; font-weight: 650; margin-top: 4px; }
-.countdown { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--accent); font-size: 1.6rem; letter-spacing: -.02em; }
+.quick-row { display: flex; gap: 10px; }
+.quick-row select { flex: 1; min-width: 0; }
+.quick-row + p { margin: 10px 0 0; }
+@media (max-width: 480px) { .quick-row { flex-direction: column; } }
 
 /* ---------- pills ---------- */
 .pill {

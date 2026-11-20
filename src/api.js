@@ -166,7 +166,7 @@ router.post('/changeovers', requireAuth, wrap(async (req, res) => {
     throw err;
   }
   audit(req.user.id, 'changeover.created', { ids, ...v, weeks: starts.length });
-  scheduler.tick().catch(() => {});
+  await scheduler.tick().catch(() => {}); // push to the PBX before replying so the UI shows the live state
   res.status(201).json({ changeover: db.prepare(`${changeoverSelect} WHERE c.id = ?`).get(ids[0]), count: ids.length });
 }));
 
@@ -180,7 +180,7 @@ router.put('/changeovers/:id', requireAuth, wrap(async (req, res) => {
   db.prepare('UPDATE changeovers SET start_at = ?, target = ?, mobile = ?, user_id = ?, note = ? WHERE id = ?')
     .run(v.start_at, v.target, v.mobile, v.user_id, v.note, c.id);
   audit(req.user.id, 'changeover.updated', { id: c.id, ...v });
-  scheduler.tick().catch(() => {});
+  await scheduler.tick().catch(() => {}); // push to the PBX before replying so the UI shows the live state
   res.json({ changeover: db.prepare(`${changeoverSelect} WHERE c.id = ?`).get(c.id) });
 }));
 
@@ -200,7 +200,7 @@ router.delete('/changeovers/:id', requireAuth, wrap(async (req, res) => {
     deleted = Number(db.prepare('DELETE FROM changeovers WHERE id = ?').run(c.id).changes);
   }
   audit(req.user.id, 'changeover.deleted', { ...c, scope: req.query.scope || 'one', deleted });
-  scheduler.tick().catch(() => {});
+  await scheduler.tick().catch(() => {}); // push to the PBX before replying so the UI shows the live state
   res.json({ ok: true, deleted });
 }));
 
@@ -297,7 +297,7 @@ router.put('/settings/route', requireAdmin, wrap(async (req, res) => {
   setSetting('applied', null);
   setSetting('route_id', newId);
   audit(req.user.id, 'settings.route', { from: oldId, to: newId });
-  scheduler.tick().catch(() => {});
+  await scheduler.tick().catch(() => {}); // push to the PBX before replying so the UI shows the live state
   res.json({ ok: true });
 }));
 

@@ -1,6 +1,5 @@
 'use strict';
 
-const crypto = require('node:crypto');
 const express = require('express');
 const { db, getSetting, setSetting, audit } = require('./db');
 const auth = require('./auth');
@@ -136,62 +135,21 @@ function parseChangeover(body, me) {
 
 const canEdit = (me, c) => me.is_admin || c.created_by === me.id || c.user_id === me.id;
 
-const MAX_REPEAT = 52;
-const REPEAT_RULES = ['weekly', 'fortnightly', 'monthly'];
-
-/**
- * Repeats: the browser sends every later occurrence's start time (computed in the
- * viewer's own time zone so daylight saving keeps the same wall-clock time).
- * Returns { starts, rule } or { error }.
- */
-function parseRepeat(body, firstStart) {
-  if (!Array.isArray(body.repeat_starts) || !body.repeat_starts.length) return { starts: [firstStart], rule: null };
-  const rule = REPEAT_RULES.includes(body.repeat_rule) ? body.repeat_rule : null;
-  if (!rule) return { error: 'Choose weekly, fortnightly or monthly' };
-  if (body.repeat_starts.length + 1 > MAX_REPEAT) return { error: `Repeat is limited to ${MAX_REPEAT} occurrences` };
-  const extra = body.repeat_starts.map((t) => Date.parse(t));
-  if (extra.some((t) => !Number.isFinite(t) || t <= firstStart)) return { error: 'Invalid repeat dates' };
-  return { starts: [firstStart, ...extra], rule };
-}
-
-function inTransaction(fn) {
-  db.exec('BEGIN');
-  try {
-    const out = fn();
-    db.exec('COMMIT');
-    return out;
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
-}
-
-const insertChangeover = (v, startAt, createdBy, seriesId, rule) => Number(db.prepare(`
-  INSERT INTO changeovers (start_at, target, mobile, user_id, note, created_by, created_at, series_id, repeat_rule)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-  .run(startAt, v.target, v.mobile, v.user_id, v.note, createdBy, Date.now(), seriesId, rule).lastInsertRowid);
+const noRepeats = (body) => Array.isArray(body.repeat_starts) && body.repeat_starts.length
+  ? 'Repeating changeovers are not available' : null;
 
 router.post('/changeovers', requireAuth, wrap(async (req, res) => {
   const body = req.body || {};
   const v = parseChangeover(body, req.user);
   if (v.error) return bad(res, v.error);
-  const r = parseRepeat(body, v.start_at);
-  if (r.error) return bad(res, r.error);
-
-  const seriesId = r.starts.length > 1 ? crypto.randomUUID() : null;
-  const ids = inTransaction(() => r.starts.map((t) => insertChangeover(v, t, req.user.id, seriesId, r.rule)));
-  audit(req.user.id, 'changeover.created', { ids, ...v, repeat: r.rule, count: ids.length });
+  if (noRepeats(body)) return bad(res, noRepeats(body));
+  const r = db.prepare(`INSERT INTO changeovers (start_at, target, mobile, user_id, note, created_by, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(v.start_at, v.target, v.mobile, v.user_id, v.note, req.user.id, Date.now());
+  audit(req.user.id, 'changeover.created', { id: Number(r.lastInsertRowid), ...v });
   await scheduler.tick().catch(() => {}); // push to the PBX before replying so the UI shows the live state
-  res.status(201).json({ changeover: db.prepare(`${changeoverSelect} WHERE c.id = ?`).get(ids[0]), count: ids.length });
+  res.status(201).json({ changeover: db.prepare(`${changeoverSelect} WHERE c.id = ?`).get(r.lastInsertRowid) });
 }));
 
-/**
- * Edit a changeover.
- *  scope=one (default)      only this occurrence; with repeat_starts on a non-series
- *                           changeover it becomes the first of a new series.
- *  scope=following          this occurrence and every later one in its series are
- *                           replaced by this one plus repeat_starts (or none).
- */
 router.put('/changeovers/:id', requireAuth, wrap(async (req, res) => {
   const body = req.body || {};
   const c = db.prepare('SELECT * FROM changeovers WHERE id = ?').get(req.params.id);
@@ -200,33 +158,12 @@ router.put('/changeovers/:id', requireAuth, wrap(async (req, res) => {
   if (c.start_at <= Date.now() && !req.user.is_admin) return bad(res, 'This changeover has already started');
   const v = parseChangeover(body, req.user);
   if (v.error) return bad(res, v.error);
-  const following = body.scope === 'following' && !!c.series_id;
-  const r = parseRepeat(body, v.start_at);
-  if (r.error) return bad(res, r.error);
-  if (c.series_id && !following && r.starts.length > 1) {
-    return bad(res, 'To change the repeat, edit "this and following" occurrences');
-  }
-
-  const result = inTransaction(() => {
-    let removed = 0;
-    if (following) {
-      const mine = req.user.is_admin ? '' : 'AND (created_by = ? OR user_id = ?)';
-      const args = req.user.is_admin ? [c.series_id, c.start_at, c.id] : [c.series_id, c.start_at, c.id, req.user.id, req.user.id];
-      removed = Number(db.prepare(`DELETE FROM changeovers WHERE series_id = ? AND start_at >= ? AND id != ? ${mine}`).run(...args).changes);
-    }
-    const repeating = r.starts.length > 1;
-    // Keep the series id for a single-occurrence edit; otherwise start a new series (or none).
-    const seriesId = following || repeating ? (repeating ? crypto.randomUUID() : null) : c.series_id;
-    const rule = following || repeating ? r.rule : c.repeat_rule;
-    db.prepare('UPDATE changeovers SET start_at = ?, target = ?, mobile = ?, user_id = ?, note = ?, series_id = ?, repeat_rule = ? WHERE id = ?')
-      .run(v.start_at, v.target, v.mobile, v.user_id, v.note, seriesId, rule, c.id);
-    const added = r.starts.slice(1).map((t) => insertChangeover(v, t, req.user.id, seriesId, rule));
-    return { removed, added: added.length };
-  });
-
-  audit(req.user.id, 'changeover.updated', { id: c.id, ...v, scope: following ? 'following' : 'one', repeat: r.rule, ...result });
+  if (noRepeats(body)) return bad(res, noRepeats(body));
+  db.prepare('UPDATE changeovers SET start_at = ?, target = ?, mobile = ?, user_id = ?, note = ? WHERE id = ?')
+    .run(v.start_at, v.target, v.mobile, v.user_id, v.note, c.id);
+  audit(req.user.id, 'changeover.updated', { id: c.id, ...v });
   await scheduler.tick().catch(() => {}); // push to the PBX before replying so the UI shows the live state
-  res.json({ changeover: db.prepare(`${changeoverSelect} WHERE c.id = ?`).get(c.id), count: 1 + result.added });
+  res.json({ changeover: db.prepare(`${changeoverSelect} WHERE c.id = ?`).get(c.id) });
 }));
 
 router.delete('/changeovers/:id', requireAuth, wrap(async (req, res) => {
@@ -234,19 +171,10 @@ router.delete('/changeovers/:id', requireAuth, wrap(async (req, res) => {
   if (!c) return bad(res, 'Not found', 404);
   if (!canEdit(req.user, c)) return bad(res, 'Not allowed', 403);
   if (c.start_at <= Date.now() && !req.user.is_admin) return bad(res, 'Only admins can delete a changeover that has started');
-
-  let deleted;
-  if (req.query.scope === 'following' && c.series_id) {
-    // This occurrence and every later one in the same repeating series.
-    const mine = req.user.is_admin ? '' : 'AND (created_by = ? OR user_id = ?)';
-    const args = req.user.is_admin ? [c.series_id, c.start_at] : [c.series_id, c.start_at, req.user.id, req.user.id];
-    deleted = Number(db.prepare(`DELETE FROM changeovers WHERE series_id = ? AND start_at >= ? ${mine}`).run(...args).changes);
-  } else {
-    deleted = Number(db.prepare('DELETE FROM changeovers WHERE id = ?').run(c.id).changes);
-  }
-  audit(req.user.id, 'changeover.deleted', { ...c, scope: req.query.scope || 'one', deleted });
+  db.prepare('DELETE FROM changeovers WHERE id = ?').run(c.id);
+  audit(req.user.id, 'changeover.deleted', c);
   await scheduler.tick().catch(() => {}); // push to the PBX before replying so the UI shows the live state
-  res.json({ ok: true, deleted });
+  res.json({ ok: true });
 }));
 
 /* ------------------------------------------------------------- users */

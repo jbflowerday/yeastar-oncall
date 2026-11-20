@@ -20,7 +20,6 @@ const ICONS = {
   refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
   home: '<path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
-  repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
 };
 const icon = (name, cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
 
@@ -214,8 +213,7 @@ function itemRow(c, { past = false } = {}) {
   const editable = me.is_admin || ((c.created_by === me.id || c.user_id === me.id) && !past && c.start_at > Date.now());
   const isDefault = c.target === 'default';
   const title = isDefault ? 'Normal routing' : esc(c.user_name || 'External number');
-  const sub = (c.series_id ? `${icon('repeat')} ` : '')
-    + [isDefault ? 'Stop forwarding' : prettyNum(c.mobile), c.note ? esc(c.note) : ''].filter(Boolean).join(' · ');
+  const sub = [isDefault ? 'Stop forwarding' : prettyNum(c.mobile), c.note ? esc(c.note) : ''].filter(Boolean).join(' · ');
   return `<li class="item ${isDefault ? 'default' : ''} ${past ? 'past' : ''}">
     <div class="time">${esc(fmtTime(c.start_at))}</div>
     <div class="body"><div class="title">${title}</div><div class="sub">${sub}</div></div>
@@ -340,73 +338,16 @@ async function onScheduleClick(e) {
   if (del) {
     const c = all.find((x) => x.id === Number(del.dataset.del));
     if (!c) return;
-    const later = c.series_id ? state.sched.upcoming.filter((x) => x.series_id === c.series_id && x.start_at > c.start_at).length : 0;
-    if (later) confirmSeriesDelete(c, later);
-    else if (confirm(`Delete the changeover on ${fmtDateTime(c.start_at)}?`)) deleteChangeover(c, 'one');
+    if (confirm(`Delete the changeover on ${fmtDateTime(c.start_at)}?`)) deleteChangeover(c);
   }
 }
 
-async function deleteChangeover(c, scope) {
+async function deleteChangeover(c) {
   try {
-    const r = await api('DELETE', `/changeovers/${c.id}${scope === 'following' ? '?scope=following' : ''}`);
-    toast(r.deleted > 1 ? `${r.deleted} changeovers deleted` : 'Changeover deleted');
+    await api('DELETE', `/changeovers/${c.id}`);
+    toast('Changeover deleted');
     viewSchedule();
   } catch (err) { toast(err.message, true); }
-}
-
-const REPEAT_LABELS = { weekly: 'weekly', fortnightly: 'fortnightly', monthly: 'monthly' };
-
-function confirmSeriesDelete(c, later) {
-  const dlg = dialog('Delete repeating changeover', `
-    <form method="dialog">
-      <p>This changeover on <b>${esc(fmtDateTime(c.start_at))}</b> repeats ${esc(REPEAT_LABELS[c.repeat_rule] || 'weekly')}.
-        ${later} later ${later === 1 ? 'occurrence is' : 'occurrences are'} scheduled.</p>
-      <div class="form-actions wrap">
-        <button type="button" class="btn secondary" data-close>Cancel</button>
-        <button type="button" class="btn secondary" data-scope="one">This one only</button>
-        <button type="button" class="btn danger" data-scope="following">This &amp; following (${later + 1})</button>
-      </div>
-    </form>`);
-  dlg.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-scope]');
-    if (!b) return;
-    dlg.close();
-    deleteChangeover(c, b.dataset.scope);
-  });
-}
-
-/**
- * Start times of the later occurrences of a repeat, computed in local time so
- * daylight saving keeps the same clock time. Monthly repeats keep the day of the
- * month, falling back to the month's last day (e.g. the 31st -> 30 Apr).
- */
-function repeatStarts(firstMs, rule, count) {
-  const out = [];
-  const first = new Date(firstMs);
-  for (let i = 1; i < count; i++) {
-    const d = new Date(firstMs);
-    if (rule === 'monthly') {
-      d.setDate(1);
-      d.setMonth(first.getMonth() + i);
-      const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-      d.setDate(Math.min(first.getDate(), lastDay));
-    } else {
-      d.setDate(d.getDate() + (rule === 'fortnightly' ? 14 : 7) * i);
-    }
-    out.push(d.getTime());
-  }
-  return out;
-}
-
-const ordinal = (n) => n + (['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] || ['th', 'st', 'nd', 'rd'][n % 100] || 'th');
-
-function repeatSummary(firstMs, rule, count) {
-  const first = new Date(firstMs);
-  const last = repeatStarts(firstMs, rule, count).pop();
-  const day = first.toLocaleDateString([], { weekday: 'long' });
-  const when = rule === 'monthly' ? `Monthly on the ${ordinal(first.getDate())}${first.getDate() > 28 ? ' (or the last day of shorter months)' : ''}`
-    : rule === 'fortnightly' ? `Every second ${day}` : `Every ${day}`;
-  return `${when} at ${fmtTime(firstMs)}, ${count} times – last on ${fmtDate(last)}.`;
 }
 
 function dialog(title, bodyHtml) {
@@ -427,24 +368,9 @@ function openChangeoverDialog(existing) {
   const wanted = existing?.user_id || me.id;
   const selUser = users.some((u) => u.id === wanted) ? wanted : users[0]?.id;
 
-  // Editing an occurrence of a series: offer "this one" or "this & following".
-  const inSeries = !!existing?.series_id;
-  const seriesLeft = inSeries
-    ? state.sched.upcoming.filter((x) => x.series_id === existing.series_id && x.start_at >= existing.start_at).length || 1
-    : 0;
-  const initialRule = inSeries ? (existing.repeat_rule || 'weekly') : '';
-  const initialCount = inSeries ? Math.max(2, seriesLeft) : 4;
-  const ruleOpt = (v, label) => `<option value="${v}" ${initialRule === v ? 'selected' : ''}>${label}</option>`;
-
   const dlg = dialog(existing ? 'Edit changeover' : 'New changeover', `
     <form>
       <div class="form-error hidden"></div>
-      ${inSeries ? `
-      <div class="field"><span class="muted small">${icon('repeat')} Repeats ${esc(REPEAT_LABELS[initialRule])} – apply changes to</span></div>
-      <div class="seg">
-        <label><input type="radio" name="scope" value="one" checked>This one</label>
-        <label><input type="radio" name="scope" value="following">This &amp; following (${seriesLeft})</label>
-      </div>` : ''}
       <label class="field"><span>Who is on call</span>
         <select class="input" name="user_id" ${users.length < 2 ? 'disabled' : ''}>
           ${users.map((u) => `<option value="${u.id}" data-mobile="${esc(u.mobile)}" ${u.id === selUser ? 'selected' : ''}>${esc(u.display_name || u.username)}</option>`).join('')
@@ -456,17 +382,6 @@ function openChangeoverDialog(existing) {
       ${existing ? '' : '<label class="check"><input type="checkbox" name="now"> Start immediately</label>'}
       <label class="field start-field"><span>Changeover date &amp; time</span>
         <input class="input" type="datetime-local" name="start_at" value="${toLocalInput(defStart)}" required></label>
-      <div class="repeat-block">
-        <label class="field"><span>Repeat</span>
-          <select class="input" name="repeat">
-            ${ruleOpt('', 'Does not repeat')}${ruleOpt('weekly', 'Weekly')}${ruleOpt('fortnightly', 'Fortnightly')}${ruleOpt('monthly', 'Monthly')}
-          </select></label>
-        <div class="repeat-fields hidden">
-          <label class="field"><span>Number of times (including the first)</span>
-            <input class="input" type="number" name="count" min="2" max="52" value="${initialCount}" inputmode="numeric"></label>
-        </div>
-        <p class="muted small repeat-summary"></p>
-      </div>
       <label class="field"><span>Note (optional)</span>
         <input class="input" name="note" maxlength="200" placeholder="e.g. Weekend cover" value="${esc(existing?.note || '')}"></label>
       <p class="muted small">Stays in effect until the next changeover.</p>
@@ -484,24 +399,10 @@ function openChangeoverDialog(existing) {
   if (!existing) fillMobile();
   userSel.addEventListener('change', fillMobile);
 
-  const scope = () => (inSeries ? f.scope.value : 'one');
-  const count = () => Math.min(52, Math.max(2, Number(f.count.value) || 2));
-  const firstStart = () => (f.now?.checked ? Date.now() : Date.parse(f.start_at.value));
-
   const sync = () => {
     const now = f.now?.checked;
     $('.start-field', form).classList.toggle('hidden', !!now);
     f.start_at.required = !now;
-    // A single-occurrence edit of a series can't change the repeat.
-    const showRepeat = !inSeries || scope() === 'following';
-    $('.repeat-block', form).classList.toggle('hidden', !showRepeat);
-    const rule = f.repeat.value;
-    $('.repeat-fields', form).classList.toggle('hidden', !rule);
-    const first = firstStart();
-    let summary = '';
-    if (showRepeat && rule && Number.isFinite(first)) summary = repeatSummary(first, rule, count());
-    else if (showRepeat && inSeries && !rule) summary = 'The later occurrences of this series will be removed.';
-    $('.repeat-summary', form).textContent = summary;
   };
   form.addEventListener('change', sync);
   form.addEventListener('input', sync);
@@ -516,21 +417,11 @@ function openChangeoverDialog(existing) {
       mobile: mobileIn.value,
       note: f.note.value,
       start_at: now ? 'now' : new Date(f.start_at.value).toISOString(),
-      scope: scope(),
     };
-    const rule = f.repeat.value;
-    if (rule && (!inSeries || scope() === 'following')) {
-      // Leave a little slack after "now" so the server sees the repeats as later than the first.
-      const first = now ? Date.now() + 60_000 : Date.parse(f.start_at.value);
-      body.repeat_rule = rule;
-      body.repeat_starts = repeatStarts(first, rule, count()).map((t) => new Date(t).toISOString());
-    }
     try {
-      const r = await api(existing ? 'PUT' : 'POST', existing ? `/changeovers/${existing.id}` : '/changeovers', body);
+      await api(existing ? 'PUT' : 'POST', existing ? `/changeovers/${existing.id}` : '/changeovers', body);
       dlg.close();
-      toast(existing
-        ? (r.count > 1 ? `Updated – ${r.count} changeovers in the series` : 'Changeover updated')
-        : (r.count > 1 ? `${r.count} changeovers scheduled` : 'Changeover scheduled'));
+      toast(existing ? 'Changeover updated' : 'Changeover scheduled');
       viewSchedule();
     } catch (err) {
       const el = $('.form-error', form); el.textContent = err.message; el.classList.remove('hidden');

@@ -10,6 +10,7 @@ const ICONS = {
   calendar: '<rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>',
   user: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
@@ -80,7 +81,7 @@ const prettyNum = (n) => esc(n || '');
 
 /* =========================================================== state */
 
-const state = { user: null, users: [], status: null, sched: null };
+const state = { user: null, members: [], status: null, sched: null };
 let refreshTimer, tickTimer;
 
 /* =========================================================== login */
@@ -129,7 +130,8 @@ function renderLogin() {
 
 const NAV = [
   { id: 'schedule', label: 'Schedule', icon: 'calendar' },
-  { id: 'users', label: 'Team', icon: 'users', admin: true },
+  { id: 'team', label: 'Team', icon: 'users', admin: true },
+  { id: 'users', label: 'Users', icon: 'key', admin: true },
   { id: 'settings', label: 'PBX', icon: 'settings', admin: true },
   { id: 'profile', label: 'Profile', icon: 'user' },
 ];
@@ -163,15 +165,15 @@ function route() {
   clearInterval(refreshTimer); clearInterval(tickTimer);
   $('#view').onclick = null;
   window.scrollTo(0, 0);
-  ({ schedule: viewSchedule, users: viewUsers, settings: viewSettings, profile: viewProfile })[r]();
+  ({ schedule: viewSchedule, team: viewTeam, users: viewUsers, settings: viewSettings, profile: viewProfile })[r]();
 }
 window.addEventListener('hashchange', route);
 
 /* =========================================================== schedule */
 
 async function loadSchedule() {
-  const [status, sched, users] = await Promise.all([api('GET', '/status'), api('GET', '/changeovers'), api('GET', '/users')]);
-  state.status = status; state.sched = sched; state.users = users.users;
+  const [status, sched, members] = await Promise.all([api('GET', '/status'), api('GET', '/changeovers'), api('GET', '/members')]);
+  state.status = status; state.sched = sched; state.members = members.members;
 }
 
 function syncPill(s) {
@@ -201,7 +203,7 @@ function heroCard(s) {
   return `
     <section class="card hero">
       <div class="label">On call now</div>
-      <div class="who">${esc(a.user_name || 'On-call')}</div>
+      <div class="who">${esc(a.member_name || 'Former team member')}</div>
       <a class="num" href="tel:${esc(a.mobile)}">${icon('phone')} ${prettyNum(a.mobile)}</a>
       <div class="meta">${pill}<span>Since ${esc(fmtDateTime(a.start_at))}</span></div>
     </section>`;
@@ -209,9 +211,9 @@ function heroCard(s) {
 
 function itemRow(c, { past = false } = {}) {
   const me = state.user;
-  const editable = me.is_admin || ((c.created_by === me.id || c.user_id === me.id) && !past && c.start_at > Date.now());
+  const editable = me.is_admin || (!past && c.start_at > Date.now());
   const isDefault = c.target === 'default';
-  const title = isDefault ? 'Normal routing' : esc(c.user_name || 'External number');
+  const title = isDefault ? 'Normal routing' : esc(c.member_name || 'Former team member');
   const sub = [isDefault ? 'Stop forwarding' : prettyNum(c.mobile), c.note ? esc(c.note) : ''].filter(Boolean).join(' · ');
   return `<li class="item ${isDefault ? 'default' : ''} ${past ? 'past' : ''}">
     <div class="time">${esc(fmtTime(c.start_at))}</div>
@@ -274,11 +276,6 @@ async function viewSchedule() {
   }, 30000);
 }
 
-// People who can be put on call: everyone for admins, just yourself otherwise – never the built-in admin login.
-function oncallCandidates() {
-  const me = state.user;
-  return (me.is_admin ? state.users : state.users.filter((u) => u.id === me.id)).filter((u) => !u.is_system);
-}
 
 async function onScheduleClick(e) {
   const edit = e.target.closest('[data-edit]');
@@ -492,18 +489,17 @@ function dialog(title, bodyHtml) {
 
 function openChangeoverDialog(existing) {
   const me = state.user;
-  const users = oncallCandidates();
+  const members = state.members;
   const defStart = existing ? existing.start_at : (() => { const d = new Date(); d.setHours(d.getHours() + 1, 0, 0, 0); return d.getTime(); })();
-  const wanted = existing?.user_id || me.id;
-  const selUser = users.some((u) => u.id === wanted) ? wanted : users[0]?.id;
+  const selMember = members.some((m) => m.id === existing?.member_id) ? existing.member_id : members[0]?.id;
 
   const dlg = dialog(existing ? 'Edit changeover' : 'New changeover', `
     <form>
       <div class="form-error hidden"></div>
       <label class="field"><span>Who is on call</span>
-        <select class="input" name="user_id" ${users.length < 2 ? 'disabled' : ''}>
-          ${users.map((u) => `<option value="${u.id}" data-mobile="${esc(u.mobile)}" ${u.id === selUser ? 'selected' : ''}>${esc(u.display_name || u.username)}</option>`).join('')
-            || '<option value="">No team members yet – add them on the Team tab</option>'}
+        <select class="input" name="member_id" ${members.length < 2 ? 'disabled' : ''}>
+          ${members.map((m) => `<option value="${m.id}" data-mobile="${esc(m.mobile)}" ${m.id === selMember ? 'selected' : ''}>${esc(m.name)}</option>`).join('')
+            || `<option value="">No team members yet${me.is_admin ? ' – add them on the Team tab' : ' – ask an admin to add them'}</option>`}
         </select></label>
       <label class="field"><span>Mobile number to forward to</span>
         <input class="input" name="mobile" type="tel" inputmode="tel" autocomplete="tel" placeholder="e.g. 0412 345 678"
@@ -523,7 +519,7 @@ function openChangeoverDialog(existing) {
   const f = form.elements;
   const picker = dateTimePicker(defStart);
   $('.dtp-slot', form).replaceWith(picker.el);
-  const userSel = f.user_id;
+  const userSel = f.member_id;
   const mobileIn = f.mobile;
   const fillMobile = () => { mobileIn.value = userSel.selectedOptions[0]?.dataset.mobile || ''; };
   if (!existing) fillMobile();
@@ -542,7 +538,7 @@ function openChangeoverDialog(existing) {
     const btn = $('button[type=submit]', form); btn.disabled = true;
     const now = f.now?.checked;
     const body = {
-      user_id: Number(userSel.value),
+      member_id: Number(userSel.value),
       mobile: mobileIn.value,
       note: f.note.value,
       start_at: now ? 'now' : new Date(picker.value).toISOString(),
@@ -559,21 +555,82 @@ function openChangeoverDialog(existing) {
   });
 }
 
-/* =========================================================== team (admin) */
+/* =========================================================== team members (admin) */
+
+async function viewTeam() {
+  const view = $('#view');
+  let members;
+  try { members = (await api('GET', '/members')).members; } catch (err) { toast(err.message, true); return; }
+  state.members = members;
+  view.innerHTML = `
+    <div class="page-head"><h1>Team</h1>
+      <button class="btn" id="add-member">${icon('plus')} <span>Add member</span></button></div>
+    <p class="muted small page-note">People who can be put on call. They don't need a login.</p>
+    <section class="card">${members.length ? `<ul class="list">
+      ${members.map((m) => `<li class="item">
+        <div class="avatar ${avClass(m.id)}">${esc(initials(m.name))}</div>
+        <div class="body"><div class="title">${esc(m.name)}</div>
+          <div class="sub"><a href="tel:${esc(m.mobile)}">${prettyNum(m.mobile)}</a></div></div>
+        <div class="actions">
+          <button class="btn ghost icon-btn" data-edit-member="${m.id}" aria-label="Edit">${icon('edit')}</button>
+          <button class="btn ghost icon-btn" data-del-member="${m.id}" aria-label="Delete">${icon('trash')}</button>
+        </div></li>`).join('')}
+    </ul>` : `<div class="empty">${icon('users')}<div>No team members yet.</div>
+      <div class="small">Add the people who take after-hours calls.</div></div>`}</section>`;
+  $('#add-member').addEventListener('click', () => openMemberDialog());
+  view.onclick = async (e) => {
+    const ed = e.target.closest('[data-edit-member]');
+    const del = e.target.closest('[data-del-member]');
+    if (ed) openMemberDialog(members.find((m) => m.id === Number(ed.dataset.editMember)));
+    if (del) {
+      const m = members.find((x) => x.id === Number(del.dataset.delMember));
+      if (!confirm(`Remove ${m.name} from the team? Changeovers already scheduled for them keep their number.`)) return;
+      try { await api('DELETE', `/members/${m.id}`); toast('Team member removed'); viewTeam(); } catch (err) { toast(err.message, true); }
+    }
+  };
+}
+
+function openMemberDialog(m) {
+  const dlg = dialog(m ? 'Edit team member' : 'Add team member', `
+    <form autocomplete="off">
+      <div class="form-error hidden"></div>
+      <label class="field"><span>Name</span><input class="input" name="name" value="${esc(m?.name || '')}" required maxlength="80"></label>
+      <label class="field"><span>Mobile number</span>
+        <input class="input" name="mobile" type="tel" inputmode="tel" value="${esc(m?.mobile || '')}" placeholder="e.g. 0412 345 678" required></label>
+      <div class="form-actions">
+        <button type="button" class="btn secondary" data-close>Cancel</button>
+        <button type="submit" class="btn">${m ? 'Save' : 'Add'}</button>
+      </div>
+    </form>`);
+  const form = $('form', dlg);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = form.elements;
+    try {
+      await api(m ? 'PUT' : 'POST', m ? `/members/${m.id}` : '/members', { name: f.name.value, mobile: f.mobile.value });
+      dlg.close(); toast(m ? 'Team member updated' : 'Team member added'); viewTeam();
+    } catch (err) {
+      const el = $('.form-error', form); el.textContent = err.message; el.classList.remove('hidden');
+    }
+  });
+}
+
+/* =========================================================== app users / logins (admin) */
 
 async function viewUsers() {
   const view = $('#view');
   let users;
   try { users = (await api('GET', '/users')).users; } catch (err) { toast(err.message, true); return; }
-  state.users = users;
   view.innerHTML = `
-    <div class="page-head"><h1>Team</h1>
+    <div class="page-head"><h1>Users</h1>
       <button class="btn" id="add-user">${icon('plus')} <span>Add user</span></button></div>
+    <p class="muted small page-note">Logins for this app. Users can manage the schedule; admins also manage the team, users and PBX.</p>
     <section class="card"><ul class="list">
       ${users.map((u) => `<li class="item">
         <div class="avatar ${avClass(u.id)}">${esc(initials(u.display_name || u.username))}</div>
-        <div class="body"><div class="title">${esc(u.display_name || u.username)} ${u.is_admin ? '<span class="pill accent">Admin</span>' : ''}</div>
-          <div class="sub">@${esc(u.username)}${u.mobile ? ` · ${prettyNum(u.mobile)}` : ' · no mobile set'}</div></div>
+        <div class="body"><div class="title">${esc(u.display_name || u.username)}
+            ${u.is_admin ? '<span class="pill accent">Admin</span>' : ''}</div>
+          <div class="sub">@${esc(u.username)}${u.id === state.user.id ? ' · you' : ''}${u.is_system ? ' · built-in account' : ''}</div></div>
         <div class="actions">
           <button class="btn ghost icon-btn" data-edit-user="${u.id}" aria-label="Edit">${icon('edit')}</button>
           ${u.id !== state.user.id ? `<button class="btn ghost icon-btn" data-del-user="${u.id}" aria-label="Delete">${icon('trash')}</button>` : ''}
@@ -586,7 +643,7 @@ async function viewUsers() {
     if (ed) openUserDialog(users.find((u) => u.id === Number(ed.dataset.editUser)));
     if (del) {
       const u = users.find((x) => x.id === Number(del.dataset.delUser));
-      if (!confirm(`Delete user ${u.display_name || u.username}? Their scheduled changeovers stay in place.`)) return;
+      if (!confirm(`Delete the login @${u.username}? They will no longer be able to sign in.`)) return;
       try { await api('DELETE', `/users/${u.id}`); toast('User deleted'); viewUsers(); } catch (err) { toast(err.message, true); }
     }
   };
@@ -599,8 +656,6 @@ function openUserDialog(u) {
       <label class="field"><span>Username</span>
         <input class="input" name="username" value="${esc(u?.username || '')}" ${u ? 'disabled' : 'required'} autocapitalize="none"></label>
       <label class="field"><span>Display name</span><input class="input" name="display_name" value="${esc(u?.display_name || '')}"></label>
-      <label class="field"><span>Mobile number</span>
-        <input class="input" name="mobile" type="tel" inputmode="tel" value="${esc(u?.mobile || '')}" placeholder="Used as the default forward number"></label>
       <label class="field"><span>${u ? 'New password (leave blank to keep)' : 'Password'}</span>
         <input class="input" name="password" type="password" autocomplete="new-password" minlength="8" ${u ? '' : 'required'}></label>
       <label class="check"><input type="checkbox" name="is_admin" ${u?.is_admin ? 'checked' : ''}> Administrator</label>
@@ -613,7 +668,7 @@ function openUserDialog(u) {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = form.elements;
-    const body = { display_name: f.display_name.value, mobile: f.mobile.value, is_admin: f.is_admin.checked };
+    const body = { display_name: f.display_name.value, is_admin: f.is_admin.checked };
     if (f.password.value) body.password = f.password.value;
     if (!u) body.username = f.username.value;
     try {
@@ -710,8 +765,6 @@ function viewProfile() {
         <div class="card-head"><h2>Your details</h2></div>
         <form id="profile-form">
           <label class="field"><span>Display name</span><input class="input" name="display_name" value="${esc(u.display_name)}"></label>
-          <label class="field"><span>Mobile number</span>
-            <input class="input" name="mobile" type="tel" inputmode="tel" value="${esc(u.mobile)}" placeholder="Default number when you're on call"></label>
           <div class="form-actions"><button class="btn" type="submit">Save</button></div>
         </form>
       </section>
@@ -734,7 +787,7 @@ function viewProfile() {
     e.preventDefault();
     const f = e.target.elements;
     try {
-      state.user = (await api('PUT', '/me', { display_name: f.display_name.value, mobile: f.mobile.value })).user;
+      state.user = (await api('PUT', '/me', { display_name: f.display_name.value })).user;
       toast('Profile saved');
     } catch (err) { toast(err.message, true); }
   });

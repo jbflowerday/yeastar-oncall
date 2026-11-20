@@ -7,7 +7,7 @@ selected **inbound route** go to the on-call person's mobile number. Each change
 effect until the next one.
 
 - Username/password sign-in (scrypt hashes, HttpOnly session cookie)
-- Admin and standard users. Standard users schedule themselves; admins schedule anyone and manage the team
+- **Team** (people who can be on call: name + mobile) is separate from **Users** (app logins). Any user can manage the schedule; admins also manage the team, users and PBX settings
 - Mobile-first UI with a bottom tab bar and bottom-sheet forms, a desktop layout, and automatic dark mode
 - One Node.js process, one dependency (Express), and SQLite built into Node, so there is no build step
 - Audit log of logins, schedule edits and every change sent to the PBX

@@ -19,8 +19,8 @@ const routeId = () => getSetting('route_id', config.yeastar.defaultRouteId || ''
 
 function activeChangeover(now = Date.now()) {
   return db.prepare(`
-    SELECT c.*, u.display_name AS user_name, u.username AS user_username
-    FROM changeovers c LEFT JOIN users u ON u.id = c.user_id
+    SELECT c.*, m.name AS member_name
+    FROM changeovers c LEFT JOIN members m ON m.id = c.member_id
     WHERE c.start_at <= ? ORDER BY c.start_at DESC, c.id DESC LIMIT 1`).get(now) || null;
 }
 

@@ -69,6 +69,33 @@ if (!cols.includes('repeat_rule')) {
 }
 db.exec('CREATE INDEX IF NOT EXISTS idx_changeovers_series ON changeovers(series_id)');
 
+// Team members: the people who can be on call. Separate from app logins (users).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS members (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    mobile     TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  );
+`);
+if (!cols.includes('member_id')) {
+  db.exec('ALTER TABLE changeovers ADD COLUMN member_id INTEGER REFERENCES members(id) ON DELETE SET NULL');
+  // Earlier versions put logins on call. Copy every login that has a mobile number or is
+  // already scheduled into the team, and point its changeovers at the new member.
+  const people = db.prepare(`
+    SELECT u.* FROM users u
+    WHERE (u.mobile != '' AND u.username != ? COLLATE NOCASE)
+       OR EXISTS (SELECT 1 FROM changeovers c WHERE c.user_id = u.id)
+    ORDER BY u.id`).all(config.admin.username);
+  const addMember = db.prepare('INSERT INTO members (name, mobile, created_at) VALUES (?, ?, ?)');
+  const link = db.prepare('UPDATE changeovers SET member_id = ? WHERE user_id = ?');
+  for (const u of people) {
+    const id = Number(addMember.run(u.display_name || u.username, u.mobile, Date.now()).lastInsertRowid);
+    link.run(id, u.id);
+  }
+  if (people.length) console.log(`[db] copied ${people.length} user(s) into team members`);
+}
+
 function getSetting(key, fallback = null) {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
   if (!row || row.value === null) return fallback;

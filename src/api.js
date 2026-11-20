@@ -50,8 +50,6 @@ router.get('/me', requireAuth, (req, res) => res.json({ user: auth.publicUser(re
 router.put('/me', requireAuth, (req, res) => {
   const u = req.user;
   const display_name = req.body.display_name !== undefined ? str(req.body.display_name, 80) : u.display_name;
-  const mobile = req.body.mobile !== undefined ? normaliseMobile(req.body.mobile) : u.mobile;
-  if (mobile && !validMobile(mobile)) return bad(res, 'Mobile number looks invalid');
 
   if (req.body.new_password) {
     if (!auth.verifyPassword(String(req.body.current_password || ''), u.password_hash)) {
@@ -62,7 +60,7 @@ router.put('/me', requireAuth, (req, res) => {
     auth.destroyUserSessions(u.id, req);
     audit(u.id, 'password.changed');
   }
-  db.prepare('UPDATE users SET display_name = ?, mobile = ? WHERE id = ?').run(display_name, mobile, u.id);
+  db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(display_name, u.id);
   res.json({ user: auth.publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(u.id)) });
 });
 
@@ -71,7 +69,7 @@ router.put('/me', requireAuth, (req, res) => {
 router.get('/status', requireAuth, (req, res) => {
   const active = scheduler.activeChangeover();
   const next = db.prepare(`
-    SELECT c.*, u.display_name AS user_name FROM changeovers c LEFT JOIN users u ON u.id = c.user_id
+    SELECT c.*, m.name AS member_name FROM changeovers c LEFT JOIN members m ON m.id = c.member_id
     WHERE c.start_at > ? ORDER BY c.start_at ASC, c.id ASC LIMIT 1`).get(Date.now()) || null;
   const snap = getSetting('snapshot');
   res.json({
@@ -91,9 +89,9 @@ router.get('/status', requireAuth, (req, res) => {
 /* ----------------------------------------------------------- changeovers */
 
 const changeoverSelect = `
-  SELECT c.*, u.display_name AS user_name, u.username AS user_username, cb.display_name AS created_by_name
+  SELECT c.*, m.name AS member_name, cb.display_name AS created_by_name
   FROM changeovers c
-  LEFT JOIN users u ON u.id = c.user_id
+  LEFT JOIN members m ON m.id = c.member_id
   LEFT JOIN users cb ON cb.id = c.created_by`;
 
 router.get('/changeovers', requireAuth, (req, res) => {
@@ -106,45 +104,30 @@ router.get('/changeovers', requireAuth, (req, res) => {
   res.json({ active: activeFull, upcoming, past });
 });
 
-function parseChangeover(body, me) {
+function parseChangeover(body) {
   const startAt = body.start_at === 'now' ? Date.now() : Date.parse(body.start_at);
   if (!Number.isFinite(startAt)) return { error: 'Start date/time is required' };
   if (startAt < Date.now() - 5 * 60 * 1000) return { error: 'Start time cannot be in the past' };
-
   if (body.target === 'default') return { error: 'Normal routing is not available – choose who is on call' };
-  const target = 'mobile';
-  let userId = body.user_id ? Number(body.user_id) : me.id;
-  if (target === 'default') userId = null;
-  if (userId && userId !== me.id && !me.is_admin) return { error: 'Only admins can schedule other users' };
 
-  let user = null;
-  if (userId) {
-    user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-    if (!user) return { error: 'User not found' };
-    if (auth.publicUser(user).is_system) return { error: 'The built-in admin account cannot be on call – choose a team member' };
-  }
-
-  let mobile = '';
-  if (target === 'mobile') {
-    mobile = normaliseMobile(body.mobile || user?.mobile);
-    if (!mobile) return { error: 'A mobile number is required (or set one on the user profile)' };
-    if (!validMobile(mobile)) return { error: 'Mobile number looks invalid' };
-  }
-  return { start_at: startAt, target, mobile, user_id: userId, note: str(body.note, 200) };
+  const member = body.member_id ? db.prepare('SELECT * FROM members WHERE id = ?').get(Number(body.member_id)) : null;
+  if (!member) return { error: 'Choose a team member' };
+  const mobile = normaliseMobile(body.mobile || member.mobile);
+  if (!mobile) return { error: 'A mobile number is required' };
+  if (!validMobile(mobile)) return { error: 'Mobile number looks invalid' };
+  return { start_at: startAt, target: 'mobile', mobile, member_id: member.id, note: str(body.note, 200) };
 }
-
-const canEdit = (me, c) => me.is_admin || c.created_by === me.id || c.user_id === me.id;
 
 const noRepeats = (body) => Array.isArray(body.repeat_starts) && body.repeat_starts.length
   ? 'Repeating changeovers are not available' : null;
 
 router.post('/changeovers', requireAuth, wrap(async (req, res) => {
   const body = req.body || {};
-  const v = parseChangeover(body, req.user);
+  const v = parseChangeover(body);
   if (v.error) return bad(res, v.error);
   if (noRepeats(body)) return bad(res, noRepeats(body));
-  const r = db.prepare(`INSERT INTO changeovers (start_at, target, mobile, user_id, note, created_by, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(v.start_at, v.target, v.mobile, v.user_id, v.note, req.user.id, Date.now());
+  const r = db.prepare(`INSERT INTO changeovers (start_at, target, mobile, member_id, note, created_by, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(v.start_at, v.target, v.mobile, v.member_id, v.note, req.user.id, Date.now());
   audit(req.user.id, 'changeover.created', { id: Number(r.lastInsertRowid), ...v });
   await scheduler.tick().catch(() => {}); // push to the PBX before replying so the UI shows the live state
   res.status(201).json({ changeover: db.prepare(`${changeoverSelect} WHERE c.id = ?`).get(r.lastInsertRowid) });
@@ -154,13 +137,12 @@ router.put('/changeovers/:id', requireAuth, wrap(async (req, res) => {
   const body = req.body || {};
   const c = db.prepare('SELECT * FROM changeovers WHERE id = ?').get(req.params.id);
   if (!c) return bad(res, 'Not found', 404);
-  if (!canEdit(req.user, c)) return bad(res, 'Not allowed', 403);
   if (c.start_at <= Date.now() && !req.user.is_admin) return bad(res, 'This changeover has already started');
-  const v = parseChangeover(body, req.user);
+  const v = parseChangeover(body);
   if (v.error) return bad(res, v.error);
   if (noRepeats(body)) return bad(res, noRepeats(body));
-  db.prepare('UPDATE changeovers SET start_at = ?, target = ?, mobile = ?, user_id = ?, note = ? WHERE id = ?')
-    .run(v.start_at, v.target, v.mobile, v.user_id, v.note, c.id);
+  db.prepare('UPDATE changeovers SET start_at = ?, target = ?, mobile = ?, member_id = ?, note = ? WHERE id = ?')
+    .run(v.start_at, v.target, v.mobile, v.member_id, v.note, c.id);
   audit(req.user.id, 'changeover.updated', { id: c.id, ...v });
   await scheduler.tick().catch(() => {}); // push to the PBX before replying so the UI shows the live state
   res.json({ changeover: db.prepare(`${changeoverSelect} WHERE c.id = ?`).get(c.id) });
@@ -169,7 +151,6 @@ router.put('/changeovers/:id', requireAuth, wrap(async (req, res) => {
 router.delete('/changeovers/:id', requireAuth, wrap(async (req, res) => {
   const c = db.prepare('SELECT * FROM changeovers WHERE id = ?').get(req.params.id);
   if (!c) return bad(res, 'Not found', 404);
-  if (!canEdit(req.user, c)) return bad(res, 'Not allowed', 403);
   if (c.start_at <= Date.now() && !req.user.is_admin) return bad(res, 'Only admins can delete a changeover that has started');
   db.prepare('DELETE FROM changeovers WHERE id = ?').run(c.id);
   audit(req.user.id, 'changeover.deleted', c);
@@ -177,10 +158,52 @@ router.delete('/changeovers/:id', requireAuth, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-/* ------------------------------------------------------------- users */
+/* ------------------------------------------------------------ team members */
+// People who can be on call. Everyone signed in can see them (to schedule); admins manage them.
 
-// Everyone can see the roster (to pick who is on call); admins manage it.
-router.get('/users', requireAuth, (req, res) => {
+router.get('/members', requireAuth, (req, res) => {
+  res.json({ members: db.prepare('SELECT * FROM members ORDER BY name COLLATE NOCASE').all() });
+});
+
+function parseMember(body) {
+  const name = str(body.name, 80);
+  const mobile = normaliseMobile(body.mobile);
+  if (!name) return { error: 'Name is required' };
+  if (!mobile) return { error: 'Mobile number is required' };
+  if (!validMobile(mobile)) return { error: 'Mobile number looks invalid' };
+  return { name, mobile };
+}
+
+router.post('/members', requireAdmin, (req, res) => {
+  const v = parseMember(req.body || {});
+  if (v.error) return bad(res, v.error);
+  const r = db.prepare('INSERT INTO members (name, mobile, created_at) VALUES (?, ?, ?)').run(v.name, v.mobile, Date.now());
+  audit(req.user.id, 'member.created', { id: Number(r.lastInsertRowid), ...v });
+  res.status(201).json({ member: db.prepare('SELECT * FROM members WHERE id = ?').get(r.lastInsertRowid) });
+});
+
+router.put('/members/:id', requireAdmin, (req, res) => {
+  const m = db.prepare('SELECT * FROM members WHERE id = ?').get(req.params.id);
+  if (!m) return bad(res, 'Not found', 404);
+  const v = parseMember(req.body || {});
+  if (v.error) return bad(res, v.error);
+  db.prepare('UPDATE members SET name = ?, mobile = ? WHERE id = ?').run(v.name, v.mobile, m.id);
+  audit(req.user.id, 'member.updated', { id: m.id, ...v });
+  res.json({ member: db.prepare('SELECT * FROM members WHERE id = ?').get(m.id) });
+});
+
+router.delete('/members/:id', requireAdmin, (req, res) => {
+  const m = db.prepare('SELECT * FROM members WHERE id = ?').get(req.params.id);
+  if (!m) return bad(res, 'Not found', 404);
+  // Scheduled changeovers keep their mobile number, so forwarding still works.
+  db.prepare('DELETE FROM members WHERE id = ?').run(m.id);
+  audit(req.user.id, 'member.deleted', m);
+  res.json({ ok: true });
+});
+
+/* ------------------------------------------------------------- app users (logins) */
+
+router.get('/users', requireAdmin, (req, res) => {
   const rows = db.prepare('SELECT * FROM users ORDER BY display_name COLLATE NOCASE, username').all();
   res.json({ users: rows.map(auth.publicUser) });
 });
@@ -188,14 +211,12 @@ router.get('/users', requireAuth, (req, res) => {
 router.post('/users', requireAdmin, (req, res) => {
   const username = str(req.body.username, 64);
   const password = String(req.body.password || '');
-  const mobile = normaliseMobile(req.body.mobile);
   if (!/^[a-zA-Z0-9._@-]{2,64}$/.test(username)) return bad(res, 'Username: 2–64 letters, numbers, . _ @ -');
   if (password.length < 8) return bad(res, 'Password must be at least 8 characters');
-  if (mobile && !validMobile(mobile)) return bad(res, 'Mobile number looks invalid');
   if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username)) return bad(res, 'Username already exists');
-  const r = db.prepare(`INSERT INTO users (username, password_hash, display_name, mobile, is_admin, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)`).run(username, auth.hashPassword(password), str(req.body.display_name, 80) || username,
-    mobile, req.body.is_admin ? 1 : 0, Date.now());
+  const r = db.prepare(`INSERT INTO users (username, password_hash, display_name, is_admin, created_at)
+    VALUES (?, ?, ?, ?, ?)`).run(username, auth.hashPassword(password), str(req.body.display_name, 80) || username,
+    req.body.is_admin ? 1 : 0, Date.now());
   audit(req.user.id, 'user.created', { id: Number(r.lastInsertRowid), username });
   res.status(201).json({ user: auth.publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(r.lastInsertRowid)) });
 });
@@ -203,16 +224,14 @@ router.post('/users', requireAdmin, (req, res) => {
 router.put('/users/:id', requireAdmin, (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!u) return bad(res, 'Not found', 404);
-  const mobile = req.body.mobile !== undefined ? normaliseMobile(req.body.mobile) : u.mobile;
-  if (mobile && !validMobile(mobile)) return bad(res, 'Mobile number looks invalid');
   const isAdmin = req.body.is_admin !== undefined ? (req.body.is_admin ? 1 : 0) : u.is_admin;
   if (!isAdmin && u.is_admin && db.prepare('SELECT COUNT(*) n FROM users WHERE is_admin = 1').get().n <= 1) {
     return bad(res, 'At least one admin is required');
   }
-  db.prepare('UPDATE users SET display_name = ?, mobile = ?, is_admin = ? WHERE id = ?')
-    .run(req.body.display_name !== undefined ? str(req.body.display_name, 80) : u.display_name, mobile, isAdmin, u.id);
+  if (req.body.password && String(req.body.password).length < 8) return bad(res, 'Password must be at least 8 characters');
+  db.prepare('UPDATE users SET display_name = ?, is_admin = ? WHERE id = ?')
+    .run(req.body.display_name !== undefined ? str(req.body.display_name, 80) : u.display_name, isAdmin, u.id);
   if (req.body.password) {
-    if (String(req.body.password).length < 8) return bad(res, 'Password must be at least 8 characters');
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(auth.hashPassword(String(req.body.password)), u.id);
     auth.destroyUserSessions(u.id, u.id === req.user.id ? req : null);
   }
@@ -224,6 +243,9 @@ router.delete('/users/:id', requireAdmin, (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!u) return bad(res, 'Not found', 404);
   if (u.id === req.user.id) return bad(res, 'You cannot delete yourself');
+  if (u.is_admin && db.prepare('SELECT COUNT(*) n FROM users WHERE is_admin = 1').get().n <= 1) {
+    return bad(res, 'At least one admin is required');
+  }
   db.prepare('DELETE FROM users WHERE id = ?').run(u.id);
   audit(req.user.id, 'user.deleted', { id: u.id, username: u.username });
   res.json({ ok: true });

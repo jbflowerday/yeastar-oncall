@@ -107,6 +107,7 @@ h2 { font-size: 1.05rem; font-weight: 650; }
 main { max-width: 980px; margin: 0 auto; padding: 20px 16px 110px; }
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 0 16px; }
 .page-head h1 { font-size: 1.45rem; font-weight: 700; }
+.page-note { margin: -8px 0 14px; }
 
 .bottomnav {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;

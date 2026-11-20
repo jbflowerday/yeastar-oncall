@@ -482,7 +482,9 @@ function dialog(title, bodyHtml) {
     <button class="btn ghost icon-btn" data-close aria-label="Close">${icon('x')}</button></div>${bodyHtml}`;
   document.body.appendChild(dlg);
   dlg.addEventListener('close', () => dlg.remove());
-  dlg.addEventListener('click', (e) => { if (e.target === dlg || e.target.closest('[data-close]')) dlg.close(); });
+  // Only the close / cancel buttons (or Escape) close it – clicking the backdrop does nothing,
+  // so a stray tap can't throw away a half-filled form.
+  dlg.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) dlg.close(); });
   dlg.showModal();
   return dlg;
 }

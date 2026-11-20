@@ -282,9 +282,15 @@ async function viewSchedule() {
   }, 30000);
 }
 
+// People who can be put on call: everyone for admins, just yourself otherwise – never the built-in admin login.
+function oncallCandidates() {
+  const me = state.user;
+  return (me.is_admin ? state.users : state.users.filter((u) => u.id === me.id)).filter((u) => !u.is_system);
+}
+
 function quickCard(s) {
   const me = state.user;
-  const users = me.is_admin ? state.users : state.users.filter((u) => u.id === me.id);
+  const users = oncallCandidates();
   const a = s.active;
   const activeKey = !a || a.target === 'default' ? 'default' : String(a.user_id || '');
   const opt = (value, label, disabled = false) => `<option value="${esc(value)}" ${disabled ? 'disabled' : ''}
@@ -391,9 +397,10 @@ function dialog(title, bodyHtml) {
 
 function openChangeoverDialog(existing) {
   const me = state.user;
-  const users = me.is_admin ? state.users : state.users.filter((u) => u.id === me.id);
+  const users = oncallCandidates();
   const defStart = existing ? existing.start_at : (() => { const d = new Date(); d.setHours(d.getHours() + 1, 0, 0, 0); return d.getTime(); })();
-  const selUser = existing?.user_id || me.id;
+  const wanted = existing?.user_id || me.id;
+  const selUser = users.some((u) => u.id === wanted) ? wanted : users[0]?.id;
 
   const dlg = dialog(existing ? 'Edit changeover' : 'New changeover', `
     <form>
@@ -401,7 +408,8 @@ function openChangeoverDialog(existing) {
       <div class="mobile-fields">
         <label class="field"><span>Who is on call</span>
           <select class="input" name="user_id" ${users.length < 2 ? 'disabled' : ''}>
-            ${users.map((u) => `<option value="${u.id}" data-mobile="${esc(u.mobile)}" ${u.id === selUser ? 'selected' : ''}>${esc(u.display_name || u.username)}</option>`).join('')}
+            ${users.map((u) => `<option value="${u.id}" data-mobile="${esc(u.mobile)}" ${u.id === selUser ? 'selected' : ''}>${esc(u.display_name || u.username)}</option>`).join('')
+              || '<option value="">No team members yet – add them on the Team tab</option>'}
           </select></label>
         <label class="field"><span>Mobile number to forward to</span>
           <input class="input" name="mobile" type="tel" inputmode="tel" autocomplete="tel" placeholder="e.g. 0412 345 678"

@@ -122,6 +122,7 @@ function parseChangeover(body, me) {
   if (userId) {
     user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
     if (!user) return { error: 'User not found' };
+    if (auth.publicUser(user).is_system) return { error: 'The built-in admin account cannot be on call – choose a team member' };
   }
 
   let mobile = '';

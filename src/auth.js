@@ -63,6 +63,8 @@ const publicUser = (u) => u && ({
   display_name: u.display_name,
   mobile: u.mobile,
   is_admin: !!u.is_admin,
+  // The built-in ADMIN_USERNAME account is a system login, not a person who can be on call.
+  is_system: u.username.toLowerCase() === config.admin.username.toLowerCase(),
 });
 
 /** Attaches req.user if a valid session cookie is present. */

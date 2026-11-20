@@ -554,7 +554,6 @@ async function viewSettings() {
   try {
     [s, st, log] = await Promise.all([api('GET', '/settings'), api('GET', '/status'), api('GET', '/audit')]);
   } catch (err) { toast(err.message, true); return; }
-  const snap = s.snapshot;
   const a = st.applied;
 
   view.innerHTML = `
@@ -582,17 +581,6 @@ async function viewSettings() {
         <div class="form-actions"><button class="btn" id="apply-now">${icon('refresh')} Apply now</button></div>
       </section>
     </div>
-    <section class="card">
-      <div class="card-head"><h2>Normal destination snapshot</h2>
-        <button class="btn secondary" id="recapture">Re-capture</button></div>
-      <p class="muted small">Captured from the PBX just before the first redirect, and restored if a legacy “Normal routing” changeover is ever active.</p>
-      ${snap ? `<dl class="kv">
-          <dt>Route</dt><dd>#${esc(snap.route_id)} ${esc(snap.route_name || '')}</dd>
-          <dt>Captured</dt><dd>${esc(fmtDateTime(snap.captured_at))}</dd>
-          ${Object.entries(snap.fields).map(([k, v]) => `<dt class="mono">${esc(k)}</dt><dd class="mono">${esc(typeof v === 'object' ? JSON.stringify(v) : v)}</dd>`).join('')}
-        </dl>${snap.warning ? `<div class="form-error">${esc(snap.warning)}</div>` : ''}`
-        : '<div class="muted small">Not captured yet – it will be taken automatically before the first forward.</div>'}
-    </section>
     <section class="card">
       <div class="card-head"><h2>Connection</h2></div>
       <dl class="kv">
@@ -629,10 +617,6 @@ async function viewSettings() {
     e.currentTarget.disabled = true;
     try { await api('POST', '/apply'); toast('Pushed to PBX'); } catch (err) { toast(err.message, true); }
     viewSettings();
-  });
-  $('#recapture').addEventListener('click', async () => {
-    if (!confirm('Read the route\'s current destination from the PBX and use it as the normal destination?')) return;
-    try { await api('POST', '/settings/snapshot'); toast('Snapshot captured'); viewSettings(); } catch (err) { toast(err.message, true); }
   });
 }
 

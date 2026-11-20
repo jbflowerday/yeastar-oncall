@@ -62,6 +62,11 @@ const cols = db.prepare('PRAGMA table_info(changeovers)').all().map((c) => c.nam
 if (!cols.includes('series_id')) {
   db.exec('ALTER TABLE changeovers ADD COLUMN series_id TEXT');
 }
+if (!cols.includes('repeat_rule')) {
+  // Series created before repeat rules existed were weekly.
+  db.exec('ALTER TABLE changeovers ADD COLUMN repeat_rule TEXT');
+  db.exec("UPDATE changeovers SET repeat_rule = 'weekly' WHERE series_id IS NOT NULL");
+}
 db.exec('CREATE INDEX IF NOT EXISTS idx_changeovers_series ON changeovers(series_id)');
 
 function getSetting(key, fallback = null) {

@@ -9,7 +9,7 @@ immediately.
 
 - Username/password sign-in (scrypt hashes, HttpOnly session cookie)
 - Admin and standard users. Standard users schedule themselves; admins schedule anyone and manage the team
-- Repeat a changeover weekly (up to 52 weeks); delete one occurrence or the rest of the series
+- Repeat a changeover weekly, fortnightly or monthly (up to 52 times); edit or delete one occurrence or the rest of the series
 - Mobile-first UI with a bottom tab bar and bottom-sheet forms, a desktop layout, and automatic dark mode
 - One Node.js process, one dependency (Express), and SQLite built into Node, so there is no build step
 - Audit log of logins, schedule edits and every change sent to the PBX

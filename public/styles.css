@@ -151,10 +151,6 @@ main { max-width: 980px; margin: 0 auto; padding: 20px 16px 110px; }
 .hero .meta { margin-top: 14px; font-size: .88rem; opacity: .9; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
 .hero .pill { background: rgb(255 255 255 / .18); color: #fff; }
 
-.quick-row { display: flex; gap: 10px; }
-.quick-row select { flex: 1; min-width: 0; }
-.quick-row + p { margin: 10px 0 0; }
-@media (max-width: 480px) { .quick-row { flex-direction: column; } }
 
 /* ---------- pills ---------- */
 .pill {
@@ -284,3 +280,64 @@ dialog form { padding: 12px 20px 20px; }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 #toast.error { background: var(--danger); color: #fff; }
 @media (min-width: 721px) { #toast { bottom: 28px; } }
+
+/* ---------- date & time picker ---------- */
+.dtp { position: relative; }
+.dtp-field {
+  display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer; font-weight: 550;
+}
+.dtp-field .dtp-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dtp-field .icon { color: var(--muted); width: 18px; height: 18px; }
+.dtp-field .dtp-caret { transition: transform .15s; }
+.dtp-field[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.dtp-field[aria-expanded="true"] .dtp-caret { transform: rotate(180deg); }
+.dtp-panel {
+  margin-top: 8px; padding: 12px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; box-shadow: var(--shadow); animation: dtp-pop .14s ease-out;
+}
+@keyframes dtp-pop { from { opacity: 0; transform: translateY(-4px); } }
+.dtp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.dtp-month { font-weight: 700; letter-spacing: -.01em; }
+.dtp-head .btn:disabled { opacity: .3; }
+.dtp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.dtp-dow { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 4px 0 6px; }
+.dtp-day {
+  appearance: none; border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 550;
+  font-variant-numeric: tabular-nums; height: 38px; border-radius: 10px; cursor: pointer; transition: background .12s;
+}
+.dtp-day:hover { background: var(--surface-2); }
+.dtp-day.out { color: var(--muted); }
+.dtp-day.today { color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.dtp-day.sel { background: var(--accent); color: var(--on-accent); box-shadow: none; font-weight: 700; }
+.dtp-day:disabled { opacity: .28; cursor: default; background: transparent; }
+.dtp-time {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+.dtp-label { display: flex; align-items: center; gap: 6px; margin-right: auto; color: var(--muted); font-weight: 600; font-size: .85rem; }
+.dtp-label .icon { width: 16px; height: 16px; }
+.dtp-spin, .dtp-ampm { display: flex; align-items: center; background: var(--surface-2); border-radius: 12px; padding: 2px; }
+.dtp-spin button, .dtp-ampm button {
+  appearance: none; border: 0; background: transparent; color: var(--muted); cursor: pointer;
+  height: 34px; border-radius: 9px; display: grid; place-items: center; font: inherit; font-weight: 650;
+}
+.dtp-spin button { width: 28px; }
+.dtp-spin button .icon { width: 16px; height: 16px; }
+.dtp-spin button:hover, .dtp-ampm button:hover { color: var(--text); }
+.dtp-num {
+  width: 30px; border: 0; background: transparent; color: var(--text); text-align: center;
+  font: inherit; font-weight: 700; font-size: 1.05rem; font-variant-numeric: tabular-nums; padding: 0;
+}
+.dtp-num:focus { outline: none; color: var(--accent); }
+.dtp-colon { font-weight: 700; color: var(--muted); }
+.dtp-ampm button { padding: 0 10px; }
+.dtp-ampm button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.dtp-quick { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.chip {
+  appearance: none; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer;
+  border-radius: 999px; padding: 5px 12px; font: inherit; font-size: .82rem; font-weight: 600; transition: all .12s;
+}
+.chip:hover { border-color: var(--accent); }
+.chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.dtp-foot { display: flex; justify-content: space-between; margin-top: 12px; }
+@media (max-width: 380px) { .dtp-label { flex-basis: 100%; } }

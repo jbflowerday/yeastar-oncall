@@ -4,8 +4,7 @@ A small Docker-hosted web app for scheduling on-call forwarding on a **Yeastar P
 
 Users sign in and schedule **changeovers**: from a set date and time, calls arriving on a
 selected **inbound route** go to the on-call person's mobile number. Each changeover stays in
-effect until the next one. The **Switch on-call now** card on the schedule page hands over
-immediately.
+effect until the next one.
 
 - Username/password sign-in (scrypt hashes, HttpOnly session cookie)
 - Admin and standard users. Standard users schedule themselves; admins schedule anyone and manage the team

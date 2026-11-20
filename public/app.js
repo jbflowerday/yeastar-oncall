@@ -20,6 +20,10 @@ const ICONS = {
   refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
   home: '<path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  left: '<path d="m15 18-6-6 6-6"/>',
+  right: '<path d="m9 18 6-6-6-6"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
+  up: '<path d="m18 15-6-6-6 6"/>',
 };
 const icon = (name, cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
 
@@ -61,11 +65,6 @@ function dayLabel(ms) {
   if (d.toDateString() === today.toDateString()) return 'Today';
   if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
   return d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', year: d.getFullYear() !== today.getFullYear() ? 'numeric' : undefined });
-}
-function toLocalInput(ms) {
-  const d = new Date(ms);
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 const relative = (ms) => {
   const diff = Math.round((ms - Date.now()) / 60000);
@@ -251,7 +250,6 @@ async function viewSchedule() {
       <button class="btn desktop-only" id="add-btn">${icon('plus')} Add changeover</button>
     </div>
     ${heroCard(s)}
-    ${quickCard(s)}
     ${s.last_error ? `<div class="card"><div class="form-error">PBX sync problem: ${esc(s.last_error.message)}</div>
       <div class="muted small">Retrying automatically. ${state.user.is_admin ? 'Check the PBX tab for details.' : 'Let an administrator know if this persists.'}</div></div>` : ''}
     <section class="card">
@@ -266,17 +264,13 @@ async function viewSchedule() {
   $('#fab')?.addEventListener('click', () => openChangeoverDialog());
   view.onclick = onScheduleClick;
 
-  const sel = $('#quick-sel');
-  sel.addEventListener('change', () => { state.quickSel = sel.value; $('#quick-go').disabled = !sel.value; });
-  $('#quick-go').addEventListener('click', () => quickSwitch(sel.value));
-
   // Refresh shortly after the next scheduled changeover, and every 30s otherwise.
   const nextAt = s.next?.start_at;
   tickTimer = setInterval(() => {
     if (nextAt && nextAt <= Date.now() - 2500 && !$('dialog[open]')) viewSchedule();
   }, 1000);
   refreshTimer = setInterval(() => {
-    if (!$('dialog[open]') && document.activeElement !== $('#quick-sel')) viewSchedule();
+    if (!$('dialog[open]')) viewSchedule();
   }, 30000);
 }
 
@@ -284,50 +278,6 @@ async function viewSchedule() {
 function oncallCandidates() {
   const me = state.user;
   return (me.is_admin ? state.users : state.users.filter((u) => u.id === me.id)).filter((u) => !u.is_system);
-}
-
-function quickCard(s) {
-  const me = state.user;
-  const users = oncallCandidates();
-  const a = s.active;
-  const activeKey = !a || a.target === 'default' ? 'default' : String(a.user_id || '');
-  const opt = (value, label, disabled = false) => `<option value="${esc(value)}" ${disabled ? 'disabled' : ''}
-    ${state.quickSel === value ? 'selected' : ''}>${esc(label)}</option>`;
-  const options = users.map((u) => {
-    const name = u.display_name || u.username;
-    if (!u.mobile) return opt(String(u.id), `${name} – no mobile set`, true);
-    return opt(String(u.id), `${name} · ${u.mobile}${activeKey === String(u.id) ? '  (on call now)' : ''}`);
-  }).join('');
-  const until = s.next ? `until the next scheduled changeover (${fmtDateTime(s.next.start_at)})` : 'until the next scheduled changeover';
-  return `
-    <section class="card">
-      <div class="card-head"><h2>Switch on-call now</h2></div>
-      <div class="quick-row">
-        <select class="input" id="quick-sel" aria-label="Who should be on call">
-          ${opt('', 'Choose who takes calls…', true).replace('<option', `<option ${state.quickSel ? '' : 'selected'}`)}
-          ${options}
-        </select>
-        <button class="btn" id="quick-go" ${state.quickSel ? '' : 'disabled'}>${icon('phone')} Switch now</button>
-      </div>
-      <p class="muted small">Takes effect immediately and stays ${esc(until)}.</p>
-    </section>`;
-}
-
-async function quickSwitch(value) {
-  if (!value) return;
-  const u = state.users.find((x) => String(x.id) === value);
-  if (!u || !confirm(`Forward calls to ${u.display_name || u.username} (${u.mobile}) now?`)) return;
-  const btn = $('#quick-go');
-  if (btn) btn.disabled = true;
-  try {
-    await api('POST', '/changeovers', { start_at: 'now', user_id: u.id, mobile: u.mobile, note: 'Manual switch' });
-    state.quickSel = '';
-    toast(`${u.display_name || u.username} is now on call`);
-    viewSchedule();
-  } catch (err) {
-    toast(err.message, true);
-    if (btn) btn.disabled = false;
-  }
 }
 
 async function onScheduleClick(e) {
@@ -348,6 +298,195 @@ async function deleteChangeover(c) {
     toast('Changeover deleted');
     viewSchedule();
   } catch (err) { toast(err.message, true); }
+}
+
+/* =========================================================== date & time picker */
+
+const pad2 = (n) => String(n).padStart(2, '0');
+const USES_12H = new Intl.DateTimeFormat([], { hour: 'numeric' }).resolvedOptions().hour12 ?? false;
+const MINUTE_STEP = 5;
+const QUICK_TIMES = [[8, 0], [12, 0], [17, 0], [18, 0]];
+
+/**
+ * Themed inline date & time picker (replaces the browser's native datetime-local UI).
+ * Returns { el, value } where value is the selected time in ms (local time zone).
+ */
+function dateTimePicker(initialMs) {
+  const sel = new Date(initialMs);
+  sel.setSeconds(0, 0);
+  let view = new Date(sel.getFullYear(), sel.getMonth(), 1);
+  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  // Past days are disabled, except the day already chosen (e.g. editing a started changeover).
+  const minDay = Math.min(startOfDay(new Date()), startOfDay(sel));
+
+  const root = document.createElement('div');
+  root.className = 'dtp';
+  root.innerHTML = `
+    <button type="button" class="input dtp-field" aria-expanded="false" aria-haspopup="dialog">
+      ${icon('calendar')}<span class="dtp-text"></span>${icon('down', 'icon dtp-caret')}
+    </button>
+    <div class="dtp-panel hidden" role="dialog" aria-label="Choose date and time">
+      <div class="dtp-head">
+        <button type="button" class="btn ghost icon-btn" data-month="-1" aria-label="Previous month">${icon('left')}</button>
+        <div class="dtp-month" aria-live="polite"></div>
+        <button type="button" class="btn ghost icon-btn" data-month="1" aria-label="Next month">${icon('right')}</button>
+      </div>
+      <div class="dtp-grid"></div>
+      <div class="dtp-time">
+        <span class="dtp-label">${icon('clock')} Time</span>
+        <div class="dtp-spin">
+          <button type="button" data-step="h-" aria-label="Earlier hour">${icon('down')}</button>
+          <input class="dtp-num" data-part="h" inputmode="numeric" maxlength="2" aria-label="Hour">
+          <button type="button" data-step="h+" aria-label="Later hour">${icon('up')}</button>
+        </div>
+        <span class="dtp-colon">:</span>
+        <div class="dtp-spin">
+          <button type="button" data-step="m-" aria-label="Earlier minute">${icon('down')}</button>
+          <input class="dtp-num" data-part="m" inputmode="numeric" maxlength="2" aria-label="Minute">
+          <button type="button" data-step="m+" aria-label="Later minute">${icon('up')}</button>
+        </div>
+        ${USES_12H ? `<div class="dtp-ampm" role="group" aria-label="AM or PM">
+          <button type="button" data-ampm="am">am</button><button type="button" data-ampm="pm">pm</button></div>` : ''}
+      </div>
+      <div class="dtp-quick">${QUICK_TIMES.map(([h, m]) => `<button type="button" class="chip" data-quick="${h}:${m}">${esc(fmtTime(new Date(2000, 0, 1, h, m).getTime()))}</button>`).join('')}</div>
+      <div class="dtp-foot">
+        <button type="button" class="btn ghost" data-today>Today</button>
+        <button type="button" class="btn" data-done>Done</button>
+      </div>
+    </div>`;
+
+  const field = $('.dtp-field', root);
+  const panel = $('.dtp-panel', root);
+  const hourIn = $('[data-part=h]', root);
+  const minIn = $('[data-part=m]', root);
+
+  const weekdays = Array.from({ length: 7 }, (_, i) => new Date(2024, 0, 1 + i) // 1 Jan 2024 is a Monday
+    .toLocaleDateString([], { weekday: 'short' }).slice(0, 2));
+
+  function render() {
+    $('.dtp-text', root).textContent = `${sel.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })} · ${fmtTime(sel.getTime())}`;
+    $('.dtp-month', root).textContent = view.toLocaleDateString([], { month: 'long', year: 'numeric' });
+    const prevMonthEnd = new Date(view.getFullYear(), view.getMonth(), 0).getTime();
+    $('[data-month="-1"]', root).disabled = prevMonthEnd < minDay;
+
+    const first = new Date(view);
+    first.setDate(1 - ((view.getDay() + 6) % 7)); // back to Monday
+    const todayKey = new Date().toDateString();
+    let html = weekdays.map((w) => `<div class="dtp-dow">${esc(w)}</div>`).join('');
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(first.getFullYear(), first.getMonth(), first.getDate() + i);
+      const cls = ['dtp-day'];
+      if (d.getMonth() !== view.getMonth()) cls.push('out');
+      if (d.toDateString() === todayKey) cls.push('today');
+      const isSel = d.toDateString() === sel.toDateString();
+      if (isSel) cls.push('sel');
+      html += `<button type="button" class="${cls.join(' ')}" data-day="${d.getFullYear()}-${d.getMonth()}-${d.getDate()}"
+        aria-pressed="${isSel}" aria-label="${esc(d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }))}"
+        ${d.getTime() < minDay ? 'disabled' : ''}>${d.getDate()}</button>`;
+    }
+    $('.dtp-grid', root).innerHTML = html;
+
+    const h = sel.getHours();
+    if (document.activeElement !== hourIn) hourIn.value = pad2(USES_12H ? (h % 12 || 12) : h);
+    if (document.activeElement !== minIn) minIn.value = pad2(sel.getMinutes());
+    $$('[data-ampm]', root).forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.ampm === 'pm') === (h >= 12))));
+    $$('[data-quick]', root).forEach((b) => {
+      const [qh, qm] = b.dataset.quick.split(':').map(Number);
+      b.setAttribute('aria-pressed', String(qh === h && qm === sel.getMinutes()));
+    });
+  }
+
+  const setOpen = (open) => {
+    panel.classList.toggle('hidden', !open);
+    field.setAttribute('aria-expanded', String(open));
+    if (open) {
+      view = new Date(sel.getFullYear(), sel.getMonth(), 1);
+      render();
+      panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  };
+
+  const changed = () => { render(); root.dispatchEvent(new Event('change', { bubbles: true })); };
+
+  field.addEventListener('click', () => setOpen(panel.classList.contains('hidden')));
+
+  root.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b || !panel.contains(b)) return;
+    if (b.dataset.month) {
+      view.setMonth(view.getMonth() + Number(b.dataset.month));
+      render();
+    } else if (b.dataset.day) {
+      const [y, m, d] = b.dataset.day.split('-').map(Number);
+      sel.setFullYear(y, m, d);
+      if (m !== view.getMonth()) view = new Date(y, m, 1);
+      changed();
+    } else if (b.dataset.step) {
+      const part = b.dataset.step[0]; const dir = b.dataset.step[1] === '+' ? 1 : -1;
+      if (part === 'h') sel.setHours((sel.getHours() + dir + 24) % 24);
+      else {
+        // Snap to the step, then move; wraps within the hour.
+        const snapped = Math.round(sel.getMinutes() / MINUTE_STEP) * MINUTE_STEP;
+        sel.setMinutes((((dir > 0 ? snapped + MINUTE_STEP : (snapped === sel.getMinutes() ? snapped - MINUTE_STEP : snapped)) % 60) + 60) % 60);
+      }
+      changed();
+    } else if (b.dataset.ampm) {
+      const pm = b.dataset.ampm === 'pm';
+      if (pm !== sel.getHours() >= 12) sel.setHours((sel.getHours() + 12) % 24);
+      changed();
+    } else if (b.dataset.quick) {
+      const [qh, qm] = b.dataset.quick.split(':').map(Number);
+      sel.setHours(qh, qm);
+      changed();
+    } else if (b.hasAttribute('data-today')) {
+      const t = new Date();
+      sel.setFullYear(t.getFullYear(), t.getMonth(), t.getDate());
+      view = new Date(t.getFullYear(), t.getMonth(), 1);
+      changed();
+    } else if (b.hasAttribute('data-done')) {
+      setOpen(false);
+      field.focus();
+    }
+  });
+
+  // Typed hour / minute.
+  const commitTyped = (input) => {
+    const n = parseInt(input.value, 10);
+    if (Number.isFinite(n)) {
+      if (input === minIn) sel.setMinutes(Math.min(59, Math.max(0, n)));
+      else if (USES_12H) {
+        const h12 = Math.min(12, Math.max(1, n)) % 12;
+        sel.setHours(h12 + (sel.getHours() >= 12 ? 12 : 0));
+      } else sel.setHours(Math.min(23, Math.max(0, n)));
+    }
+    input.blur();
+    changed();
+  };
+  [hourIn, minIn].forEach((input) => {
+    input.addEventListener('focus', () => input.select());
+    input.addEventListener('change', () => commitTyped(input));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commitTyped(input); }
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        $(`[data-step="${input.dataset.part}${e.key === 'ArrowUp' ? '+' : '-'}"]`, root).click();
+      }
+    });
+  });
+
+  // Escape closes just the picker, not the surrounding dialog; clicks elsewhere close it too.
+  root.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !panel.classList.contains('hidden')) {
+      e.preventDefault(); e.stopPropagation();
+      setOpen(false); field.focus();
+    }
+  });
+  document.addEventListener('pointerdown', (e) => {
+    if (root.isConnected && !root.contains(e.target)) setOpen(false);
+  });
+
+  render();
+  return { el: root, get value() { return sel.getTime(); } };
 }
 
 function dialog(title, bodyHtml) {
@@ -380,8 +519,7 @@ function openChangeoverDialog(existing) {
         <input class="input" name="mobile" type="tel" inputmode="tel" autocomplete="tel" placeholder="e.g. 0412 345 678"
           value="${esc(existing?.mobile || '')}"></label>
       ${existing ? '' : '<label class="check"><input type="checkbox" name="now"> Start immediately</label>'}
-      <label class="field start-field"><span>Changeover date &amp; time</span>
-        <input class="input" type="datetime-local" name="start_at" value="${toLocalInput(defStart)}" required></label>
+      <div class="field start-field"><span>Changeover date &amp; time</span><div class="dtp-slot"></div></div>
       <label class="field"><span>Note (optional)</span>
         <input class="input" name="note" maxlength="200" placeholder="e.g. Weekend cover" value="${esc(existing?.note || '')}"></label>
       <p class="muted small">Stays in effect until the next changeover.</p>
@@ -393,6 +531,8 @@ function openChangeoverDialog(existing) {
 
   const form = $('form', dlg);
   const f = form.elements;
+  const picker = dateTimePicker(defStart);
+  $('.dtp-slot', form).replaceWith(picker.el);
   const userSel = f.user_id;
   const mobileIn = f.mobile;
   const fillMobile = () => { mobileIn.value = userSel.selectedOptions[0]?.dataset.mobile || ''; };
@@ -402,7 +542,6 @@ function openChangeoverDialog(existing) {
   const sync = () => {
     const now = f.now?.checked;
     $('.start-field', form).classList.toggle('hidden', !!now);
-    f.start_at.required = !now;
   };
   form.addEventListener('change', sync);
   form.addEventListener('input', sync);
@@ -416,7 +555,7 @@ function openChangeoverDialog(existing) {
       user_id: Number(userSel.value),
       mobile: mobileIn.value,
       note: f.note.value,
-      start_at: now ? 'now' : new Date(f.start_at.value).toISOString(),
+      start_at: now ? 'now' : new Date(picker.value).toISOString(),
     };
     try {
       await api(existing ? 'PUT' : 'POST', existing ? `/changeovers/${existing.id}` : '/changeovers', body);

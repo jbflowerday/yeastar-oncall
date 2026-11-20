@@ -159,7 +159,7 @@ router.delete('/changeovers/:id', requireAuth, wrap(async (req, res) => {
 }));
 
 /* ------------------------------------------------------------ team members */
-// People who can be on call. Everyone signed in can see them (to schedule); admins manage them.
+// People who can be on call. Any signed-in user can view and manage them.
 
 router.get('/members', requireAuth, (req, res) => {
   res.json({ members: db.prepare('SELECT * FROM members ORDER BY name COLLATE NOCASE').all() });
@@ -174,7 +174,7 @@ function parseMember(body) {
   return { name, mobile };
 }
 
-router.post('/members', requireAdmin, (req, res) => {
+router.post('/members', requireAuth, (req, res) => {
   const v = parseMember(req.body || {});
   if (v.error) return bad(res, v.error);
   const r = db.prepare('INSERT INTO members (name, mobile, created_at) VALUES (?, ?, ?)').run(v.name, v.mobile, Date.now());
@@ -182,7 +182,7 @@ router.post('/members', requireAdmin, (req, res) => {
   res.status(201).json({ member: db.prepare('SELECT * FROM members WHERE id = ?').get(r.lastInsertRowid) });
 });
 
-router.put('/members/:id', requireAdmin, (req, res) => {
+router.put('/members/:id', requireAuth, (req, res) => {
   const m = db.prepare('SELECT * FROM members WHERE id = ?').get(req.params.id);
   if (!m) return bad(res, 'Not found', 404);
   const v = parseMember(req.body || {});
@@ -192,7 +192,7 @@ router.put('/members/:id', requireAdmin, (req, res) => {
   res.json({ member: db.prepare('SELECT * FROM members WHERE id = ?').get(m.id) });
 });
 
-router.delete('/members/:id', requireAdmin, (req, res) => {
+router.delete('/members/:id', requireAuth, (req, res) => {
   const m = db.prepare('SELECT * FROM members WHERE id = ?').get(req.params.id);
   if (!m) return bad(res, 'Not found', 404);
   // Scheduled changeovers keep their mobile number, so forwarding still works.

@@ -130,7 +130,7 @@ function renderLogin() {
 
 const NAV = [
   { id: 'schedule', label: 'Schedule', icon: 'calendar' },
-  { id: 'team', label: 'Team', icon: 'users', admin: true },
+  { id: 'team', label: 'Team', icon: 'users' },
   { id: 'users', label: 'Users', icon: 'key', admin: true },
   { id: 'settings', label: 'PBX', icon: 'settings', admin: true },
   { id: 'profile', label: 'Profile', icon: 'user' },
@@ -499,7 +499,7 @@ function openChangeoverDialog(existing) {
       <label class="field"><span>Who is on call</span>
         <select class="input" name="member_id" ${members.length < 2 ? 'disabled' : ''}>
           ${members.map((m) => `<option value="${m.id}" data-mobile="${esc(m.mobile)}" ${m.id === selMember ? 'selected' : ''}>${esc(m.name)}</option>`).join('')
-            || `<option value="">No team members yet${me.is_admin ? ' – add them on the Team tab' : ' – ask an admin to add them'}</option>`}
+            || `<option value="">No team members yet – add them on the Team tab</option>`}
         </select></label>
       <label class="field"><span>Mobile number to forward to</span>
         <input class="input" name="mobile" type="tel" inputmode="tel" autocomplete="tel" placeholder="e.g. 0412 345 678"
@@ -555,7 +555,7 @@ function openChangeoverDialog(existing) {
   });
 }
 
-/* =========================================================== team members (admin) */
+/* =========================================================== team members */
 
 async function viewTeam() {
   const view = $('#view');
@@ -624,7 +624,7 @@ async function viewUsers() {
   view.innerHTML = `
     <div class="page-head"><h1>Users</h1>
       <button class="btn" id="add-user">${icon('plus')} <span>Add user</span></button></div>
-    <p class="muted small page-note">Logins for this app. Users can manage the schedule; admins also manage the team, users and PBX.</p>
+    <p class="muted small page-note">Logins for this app. Users can manage the schedule and team; admins also manage users and PBX settings.</p>
     <section class="card"><ul class="list">
       ${users.map((u) => `<li class="item">
         <div class="avatar ${avClass(u.id)}">${esc(initials(u.display_name || u.username))}</div>

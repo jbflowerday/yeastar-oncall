@@ -332,12 +332,5 @@ dialog form { padding: 12px 20px 20px; }
 .dtp-colon { font-weight: 700; color: var(--muted); }
 .dtp-ampm button { padding: 0 10px; }
 .dtp-ampm button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
-.dtp-quick { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-.chip {
-  appearance: none; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer;
-  border-radius: 999px; padding: 5px 12px; font: inherit; font-size: .82rem; font-weight: 600; transition: all .12s;
-}
-.chip:hover { border-color: var(--accent); }
-.chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .dtp-foot { display: flex; justify-content: space-between; margin-top: 12px; }
 @media (max-width: 380px) { .dtp-label { flex-basis: 100%; } }

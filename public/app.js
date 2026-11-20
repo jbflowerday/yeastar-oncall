@@ -305,7 +305,6 @@ async function deleteChangeover(c) {
 const pad2 = (n) => String(n).padStart(2, '0');
 const USES_12H = new Intl.DateTimeFormat([], { hour: 'numeric' }).resolvedOptions().hour12 ?? false;
 const MINUTE_STEP = 5;
-const QUICK_TIMES = [[8, 0], [12, 0], [17, 0], [18, 0]];
 
 /**
  * Themed inline date & time picker (replaces the browser's native datetime-local UI).
@@ -348,7 +347,6 @@ function dateTimePicker(initialMs) {
         ${USES_12H ? `<div class="dtp-ampm" role="group" aria-label="AM or PM">
           <button type="button" data-ampm="am">am</button><button type="button" data-ampm="pm">pm</button></div>` : ''}
       </div>
-      <div class="dtp-quick">${QUICK_TIMES.map(([h, m]) => `<button type="button" class="chip" data-quick="${h}:${m}">${esc(fmtTime(new Date(2000, 0, 1, h, m).getTime()))}</button>`).join('')}</div>
       <div class="dtp-foot">
         <button type="button" class="btn ghost" data-today>Today</button>
         <button type="button" class="btn" data-done>Done</button>
@@ -390,10 +388,6 @@ function dateTimePicker(initialMs) {
     if (document.activeElement !== hourIn) hourIn.value = pad2(USES_12H ? (h % 12 || 12) : h);
     if (document.activeElement !== minIn) minIn.value = pad2(sel.getMinutes());
     $$('[data-ampm]', root).forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.ampm === 'pm') === (h >= 12))));
-    $$('[data-quick]', root).forEach((b) => {
-      const [qh, qm] = b.dataset.quick.split(':').map(Number);
-      b.setAttribute('aria-pressed', String(qh === h && qm === sel.getMinutes()));
-    });
   }
 
   const setOpen = (open) => {
@@ -433,10 +427,6 @@ function dateTimePicker(initialMs) {
     } else if (b.dataset.ampm) {
       const pm = b.dataset.ampm === 'pm';
       if (pm !== sel.getHours() >= 12) sel.setHours((sel.getHours() + 12) % 24);
-      changed();
-    } else if (b.dataset.quick) {
-      const [qh, qm] = b.dataset.quick.split(':').map(Number);
-      sel.setHours(qh, qm);
       changed();
     } else if (b.hasAttribute('data-today')) {
       const t = new Date();

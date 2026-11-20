@@ -112,7 +112,8 @@ function parseChangeover(body, me) {
   if (!Number.isFinite(startAt)) return { error: 'Start date/time is required' };
   if (startAt < Date.now() - 5 * 60 * 1000) return { error: 'Start time cannot be in the past' };
 
-  const target = body.target === 'default' ? 'default' : 'mobile';
+  if (body.target === 'default') return { error: 'Normal routing is not available – choose who is on call' };
+  const target = 'mobile';
   let userId = body.user_id ? Number(body.user_id) : me.id;
   if (target === 'default') userId = null;
   if (userId && userId !== me.id && !me.is_admin) return { error: 'Only admins can schedule other users' };

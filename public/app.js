@@ -302,7 +302,6 @@ function quickCard(s) {
         <select class="input" id="quick-sel" aria-label="Who should be on call">
           ${opt('', 'Choose who takes calls…', true).replace('<option', `<option ${state.quickSel ? '' : 'selected'}`)}
           ${options}
-          ${opt('default', `Normal routing (stop forwarding)${activeKey === 'default' ? '  (current)' : ''}`)}
         </select>
         <button class="btn" id="quick-go" ${state.quickSel ? '' : 'disabled'}>${icon('phone')} Switch now</button>
       </div>
@@ -313,18 +312,13 @@ function quickCard(s) {
 async function quickSwitch(value) {
   if (!value) return;
   const u = state.users.find((x) => String(x.id) === value);
-  const msg = value === 'default'
-    ? 'Stop forwarding and return calls to normal routing now?'
-    : `Forward calls to ${u.display_name || u.username} (${u.mobile}) now?`;
-  if (!confirm(msg)) return;
+  if (!u || !confirm(`Forward calls to ${u.display_name || u.username} (${u.mobile}) now?`)) return;
   const btn = $('#quick-go');
   if (btn) btn.disabled = true;
   try {
-    await api('POST', '/changeovers', value === 'default'
-      ? { start_at: 'now', target: 'default', note: 'Manual switch' }
-      : { start_at: 'now', target: 'mobile', user_id: u.id, mobile: u.mobile, note: 'Manual switch' });
+    await api('POST', '/changeovers', { start_at: 'now', user_id: u.id, mobile: u.mobile, note: 'Manual switch' });
     state.quickSel = '';
-    toast(value === 'default' ? 'Switched to normal routing' : `${u.display_name || u.username} is now on call`);
+    toast(`${u.display_name || u.username} is now on call`);
     viewSchedule();
   } catch (err) {
     toast(err.message, true);
@@ -399,16 +393,11 @@ function openChangeoverDialog(existing) {
   const me = state.user;
   const users = me.is_admin ? state.users : state.users.filter((u) => u.id === me.id);
   const defStart = existing ? existing.start_at : (() => { const d = new Date(); d.setHours(d.getHours() + 1, 0, 0, 0); return d.getTime(); })();
-  const target = existing?.target || 'mobile';
   const selUser = existing?.user_id || me.id;
 
   const dlg = dialog(existing ? 'Edit changeover' : 'New changeover', `
     <form>
       <div class="form-error hidden"></div>
-      <div class="seg">
-        <label><input type="radio" name="target" value="mobile" ${target === 'mobile' ? 'checked' : ''}>Forward to mobile</label>
-        <label><input type="radio" name="target" value="default" ${target === 'default' ? 'checked' : ''}>Normal routing</label>
-      </div>
       <div class="mobile-fields">
         <label class="field"><span>Who is on call</span>
           <select class="input" name="user_id" ${users.length < 2 ? 'disabled' : ''}>
@@ -444,7 +433,6 @@ function openChangeoverDialog(existing) {
   if (!existing) fillMobile();
   userSel.addEventListener('change', fillMobile);
   const sync = () => {
-    $('.mobile-fields', form).classList.toggle('hidden', form.elements.target.value !== 'mobile');
     const now = form.elements.now?.checked;
     $('.start-field', form).classList.toggle('hidden', !!now);
     form.elements.start_at.required = !now;
@@ -469,7 +457,6 @@ function openChangeoverDialog(existing) {
     const btn = $('button[type=submit]', form); btn.disabled = true;
     const now = form.elements.now?.checked;
     const body = {
-      target: form.elements.target.value,
       user_id: Number(userSel.value),
       mobile: mobileIn.value,
       note: form.elements.note.value,
@@ -598,7 +585,7 @@ async function viewSettings() {
     <section class="card">
       <div class="card-head"><h2>Normal destination snapshot</h2>
         <button class="btn secondary" id="recapture">Re-capture</button></div>
-      <p class="muted small">Captured from the PBX just before the first redirect, and restored when a “Normal routing” changeover starts.</p>
+      <p class="muted small">Captured from the PBX just before the first redirect, and restored if a legacy “Normal routing” changeover is ever active.</p>
       ${snap ? `<dl class="kv">
           <dt>Route</dt><dd>#${esc(snap.route_id)} ${esc(snap.route_name || '')}</dd>
           <dt>Captured</dt><dd>${esc(fmtDateTime(snap.captured_at))}</dd>

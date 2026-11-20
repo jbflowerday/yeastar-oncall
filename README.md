@@ -4,8 +4,8 @@ A small Docker-hosted web app for scheduling on-call forwarding on a **Yeastar P
 
 Users sign in and schedule **changeovers**: from a set date and time, calls arriving on a
 selected **inbound route** go to the on-call person's mobile number. Each changeover stays in
-effect until the next one. A "Normal routing" changeover puts the route back to its usual
-destination.
+effect until the next one. The **Switch on-call now** card on the schedule page hands over
+immediately.
 
 - Username/password sign-in (scrypt hashes, HttpOnly session cookie)
 - Admin and standard users. Standard users schedule themselves; admins schedule anyone and manage the team
@@ -19,7 +19,7 @@ destination.
 1. Every `CHECK_INTERVAL_SECONDS` (default 30 s), the scheduler finds the latest changeover whose start time has passed.
 2. If that differs from what was last sent to the PBX, it calls `inbound_route/update` on the selected route:
    - **Forward to mobile**: `def_dest=external_num`, `def_dest_value=<prefix><mobile>`
-   - **Normal routing**: restores the destination fields captured just before the first redirect (the *snapshot*)
+   - The route's original destination is captured just before the first redirect (the *snapshot*), for reference and manual restore
 3. Failed updates are retried on every check, and the error appears in the UI.
 
 ## Quick start
